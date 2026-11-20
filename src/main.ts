@@ -93,6 +93,8 @@ class App {
         if (!open) this.root.classList.remove("explorer-auto-hidden");
       },
       openSettings: () => this.openSettings(),
+      activePane: () => this.active,
+      openLink: (from, target, other) => void this.openLink(from, target, null, other),
     });
 
     this.splitBtn = h("button", { class: "btn", type: "button", title: "1画面 ⇔ 2画面（Ctrl+\\）", onclick: () => this.toggleSplit() }, icon("split", 15), "2画面");
@@ -193,6 +195,7 @@ class App {
       workspace.panes[p.id] = { path: p.path, mode: p.mode, masked: p.masked };
       this.ai.paneChanged(p);
     }
+    this.ai.refreshChat();
     saveWorkspace();
     this.explorer.render();
     const path = this.active.path;

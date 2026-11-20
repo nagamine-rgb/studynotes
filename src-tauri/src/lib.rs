@@ -40,6 +40,7 @@ pub fn run() {
             secrets::secret_has,
             secrets::secret_delete,
             ai::ai_check,
+            ai::ai_chat,
             ai::ai_list_models,
         ])
         .run(tauri::generate_context!())

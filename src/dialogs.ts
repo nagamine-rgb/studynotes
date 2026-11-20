@@ -133,8 +133,10 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
 
   // AI
   const provider = h("select", { class: "input" }, ...PROVIDERS.map((p) => h("option", { value: p.id, selected: settings.ai.provider === p.id }, p.label)));
-  const modelInput = h("input", { class: "input", list: "model-list", "aria-label": "モデル" });
-  const modelList = h("datalist", { id: "model-list" });
+  // 取得した一覧から選ぶプルダウン＋一覧にないモデル名の手入力欄
+  const CUSTOM = "__custom__";
+  const modelSelect = h("select", { class: "input", "aria-label": "モデル" });
+  const modelInput = h("input", { class: "input", "aria-label": "モデル名（手入力）", placeholder: "モデル名を入力" });
   const fetchedNote = h("div", { class: "muted small" });
   const refreshBtn = h("button", { class: "btn", type: "button" }, "一覧を更新");
   const baseUrl = h("input", { class: "input", placeholder: "既定の接続先を使う" });
@@ -149,12 +151,20 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
   const syncAi = async () => {
     const p = pid();
     const def = PROVIDERS.find((x) => x.id === p)!;
-    modelInput.value = settings.ai.models[p] ?? def.defaultModel;
-    modelInput.placeholder = def.defaultModel || "モデル名";
+    const current = settings.ai.models[p] ?? def.defaultModel;
     const cached = settings.ai.modelLists[p];
-    modelList.replaceChildren(...(cached?.ids ?? []).map((id) => h("option", { value: id })));
+    const ids = cached?.ids ?? [];
+    const inList = ids.includes(current);
+    modelSelect.replaceChildren(
+      ...(current && !inList ? [h("option", { value: current }, `${current}（一覧にありません）`)] : []),
+      ...ids.map((id) => h("option", { value: id }, id)),
+      h("option", { value: CUSTOM }, "その他（モデル名を手入力）"),
+    );
+    modelSelect.value = current ? current : CUSTOM;
+    modelInput.value = current;
+    modelInput.hidden = modelSelect.value !== CUSTOM;
     fetchedNote.textContent = cached
-      ? `一覧の取得日時：${new Date(cached.fetchedAt).toLocaleString("ja-JP")}（${cached.ids.length}件）。入力欄をクリックすると候補が出ます`
+      ? `一覧の取得日時：${new Date(cached.fetchedAt).toLocaleString("ja-JP")}（${ids.length}件）`
       : "［一覧を更新］で、このサービスで使える最新のモデルを取得します";
     baseUrl.value = settings.ai.baseUrls[p] ?? "";
     baseUrl.placeholder = p === "custom" ? "例：http://localhost:11434/v1" : "空欄なら既定の接続先";
@@ -169,6 +179,16 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
     settings.ai.provider = pid();
     saveSettings();
     void syncAi();
+  });
+  modelSelect.addEventListener("change", () => {
+    if (modelSelect.value === CUSTOM) {
+      modelInput.hidden = false;
+      modelInput.focus();
+      return;
+    }
+    modelInput.hidden = true;
+    settings.ai.models[pid()] = modelSelect.value;
+    saveSettings();
   });
   modelInput.addEventListener("change", () => {
     settings.ai.models[pid()] = modelInput.value.trim();
@@ -189,7 +209,7 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
       saveSettings();
       toast(`${ids.length}件のモデルを取得しました`);
       void syncAi();
-      modelInput.focus();
+      modelSelect.focus();
     } catch (e) {
       toast(errorText(e), "error");
     } finally {
@@ -240,9 +260,10 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
         row("隠す対象", h("div", { class: "checks" }, check("==強調==", "highlight"), check("{{穴埋め}}", "cloze"), check("**太字**", "bold")), "ノートの先頭に mask: highlight, bold のように書くと、そのノートだけ変えられます"),
       ),
       section(
-        "AIチェック",
+        "AI（チェック・チャット）",
         row("サービス", provider),
-        row("モデル", h("div", { class: "inline" }, modelInput, modelList, refreshBtn), undefined),
+        row("モデル", h("div", { class: "inline" }, modelSelect, refreshBtn), undefined),
+        h("div", { class: "set-row" }, h("span", { class: "set-label" }), h("div", { class: "set-control" }, modelInput)),
         h("div", { class: "set-row" }, h("span", { class: "set-label" }), h("div", { class: "set-control" }, fetchedNote)),
         row("APIキー", h("div", { class: "inline" }, keyInput, keySave, keyDelete, keyStatus), "キーは画面に再表示されません"),
         h("div", { class: "set-row" }, h("span", { class: "set-label" }), h("div", { class: "set-control" }, keyLink)),

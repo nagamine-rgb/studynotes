@@ -5,6 +5,7 @@ import { h, iconButton, toast } from "./dom";
 import { type LocatedIssue, locateIssues, shiftIssues } from "./lib/issues";
 import { noteName } from "./lib/links";
 import { parseFrontmatter } from "./lib/text";
+import { ChatView } from "./chat";
 import type { Pane } from "./pane";
 import { currentModel, PROVIDERS, saveSettings, settings } from "./settings";
 
@@ -14,7 +15,12 @@ const KIND_LABEL: Record<string, string> = { typo: "誤字", style: "表記", fa
 export interface AiHost {
   setOpen(open: boolean): void;
   openSettings(): void;
+  /** チャット用：いま対象にするペイン（アクティブなペイン） */
+  activePane(): Pane;
+  openLink(from: Pane, target: string, other: boolean): void;
 }
+
+type Tab = "check" | "chat";
 
 export class AiPanel {
   el: HTMLElement;
@@ -30,6 +36,9 @@ export class AiPanel {
   private listEl: HTMLElement;
   private acceptAllBtn: HTMLButtonElement;
   private summaryEl: HTMLElement;
+  private chat: ChatView;
+  private tab: Tab = "check";
+  private tabBtns: Record<Tab, HTMLButtonElement>;
 
   constructor(private host: AiHost) {
     this.targetEl = h("div", { class: "ai-target" });
@@ -41,10 +50,17 @@ export class AiPanel {
     this.summaryEl = h("div", { class: "ai-summary muted small" });
     this.listEl = h("div", { class: "ai-list" });
     this.acceptAllBtn = h("button", { class: "btn block", type: "button", onclick: () => this.acceptAll() }, "誤字・表記をすべて採用");
-    this.el = h(
-      "aside",
-      { class: "ai-panel", "aria-label": "AIチェック" },
-      h("div", { class: "ai-head" }, h("strong", {}, "AIチェック"), iconButton("close", "閉じる（Esc）", () => this.close())),
+    this.chat = new ChatView({
+      pane: () => this.host.activePane(),
+      openLink: (target, other) => this.host.openLink(this.host.activePane(), target, other),
+    });
+    this.tabBtns = {
+      check: h("button", { class: "tab", type: "button", role: "tab", onclick: () => this.setTab("check") }, "チェック"),
+      chat: h("button", { class: "tab", type: "button", role: "tab", onclick: () => this.setTab("chat") }, "チャット"),
+    };
+    const checkView = h(
+      "div",
+      { class: "check-view" },
       h(
         "div",
         { class: "ai-controls" },
@@ -62,12 +78,40 @@ export class AiPanel {
       this.listEl,
       h("div", { class: "ai-foot" }, this.acceptAllBtn),
     );
+    this.el = h(
+      "aside",
+      { class: "ai-panel", "aria-label": "AI" },
+      h(
+        "div",
+        { class: "ai-head" },
+        h("div", { class: "tabs", role: "tablist" }, this.tabBtns.check, this.tabBtns.chat),
+        iconButton("close", "閉じる（Esc）", () => this.close()),
+      ),
+      checkView,
+      this.chat.el,
+    );
     this.listEl.addEventListener("click", (e) => this.onListClick(e));
+    this.setTab("check");
     this.render();
   }
 
-  /** パネルを開いて対象のペインを決める */
-  openFor(pane: Pane): void {
+  setTab(tab: Tab): void {
+    this.tab = tab;
+    this.el.dataset.tab = tab;
+    for (const [k, b] of Object.entries(this.tabBtns)) b.setAttribute("aria-selected", String(k === tab));
+    if (tab === "chat") {
+      this.chat.render();
+      this.chat.focus();
+    } else this.runBtn.focus();
+  }
+
+  /** 表示中のノートが変わったときにチャットの「参照」表示を更新する */
+  refreshChat(): void {
+    if (this.isOpen && this.tab === "chat") this.chat.render();
+  }
+
+  /** パネルを開いて対象のペインを決める（tab を省略すると前回のタブ） */
+  openFor(pane: Pane, tab?: Tab): void {
     if (this.pane !== pane || this.targetPath !== pane.path) this.clear();
     this.pane = pane;
     this.targetPath = pane.path;
@@ -76,7 +120,7 @@ export class AiPanel {
       this.host.setOpen(true);
     }
     this.render();
-    this.runBtn.focus();
+    this.setTab(tab ?? this.tab);
   }
 
   close(): void {

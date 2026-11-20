@@ -29,6 +29,14 @@ export const api = {
   secretDelete: (provider: string) => invoke<void>("secret_delete", { provider }),
   aiCheck: (req: { provider: string; model: string; base_url: string | null; text: string; mode: "typo" | "facts" }) =>
     invoke<Issue[]>("ai_check", { req }),
+  aiChat: (req: {
+    provider: string;
+    model: string;
+    base_url: string | null;
+    messages: { role: "user" | "assistant"; content: string }[];
+    note_name: string | null;
+    note_text: string | null;
+  }) => invoke<string>("ai_chat", { req }),
   aiListModels: (providerId: string, baseUrl: string | null) => invoke<string[]>("ai_list_models", { providerId, baseUrl }),
 };
 

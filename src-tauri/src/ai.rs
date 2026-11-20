@@ -56,9 +56,9 @@ fn provider(id: &str, base_url: Option<&str>) -> Result<Provider, String> {
     Ok(Provider { base: if id == "custom" { p.base } else { custom.unwrap_or(p.base) }, ..p })
 }
 
-fn client() -> Result<reqwest::Client, String> {
+fn client(secs: u64) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(secs))
         .build()
         .map_err(|e| e.to_string())
 }
@@ -89,7 +89,7 @@ fn user_prompt(req: &CheckRequest) -> String {
 async fn send(rb: reqwest::RequestBuilder) -> Result<Value, String> {
     let res = rb.send().await.map_err(|e| {
         if e.is_timeout() {
-            "AIサービスから60秒以内に応答がありませんでした".to_string()
+            "AIサービスから時間内に応答がありませんでした".to_string()
         } else {
             format!("AIサービスに接続できません: {e}")
         }
@@ -138,6 +138,63 @@ pub fn parse_issues(text: &str) -> Result<Vec<Issue>, String> {
         .collect())
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct Message {
+    /// "user" または "assistant"
+    pub role: String,
+    pub content: String,
+}
+
+fn join_text(parts: Option<&Value>) -> String {
+    parts
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(""))
+        .unwrap_or_default()
+}
+
+/// 各社のAPIの違いを吸収して、会話の続きを1つ生成する。
+async fn complete(p: &Provider, key: &str, model: &str, system: &str, messages: &[Message], json_out: bool, secs: u64) -> Result<String, String> {
+    let c = client(secs)?;
+    let text = match p.api {
+        Api::OpenAiLike => {
+            let mut msgs = vec![json!({"role": "system", "content": system})];
+            msgs.extend(messages.iter().map(|m| json!({"role": m.role, "content": m.content})));
+            let mut body = json!({"model": model, "messages": msgs});
+            if json_out && p.json_mode {
+                body["response_format"] = json!({"type": "json_object"});
+            }
+            let v = send(c.post(format!("{}/chat/completions", p.base)).bearer_auth(key).json(&body)).await?;
+            v.pointer("/choices/0/message/content").and_then(|x| x.as_str()).unwrap_or("").to_string()
+        }
+        Api::Gemini => {
+            let contents: Vec<Value> = messages
+                .iter()
+                .map(|m| json!({"role": if m.role == "assistant" { "model" } else { "user" }, "parts": [{"text": m.content}]}))
+                .collect();
+            let mut body = json!({"systemInstruction": {"parts": [{"text": system}]}, "contents": contents});
+            if json_out {
+                body["generationConfig"] = json!({"responseMimeType": "application/json"});
+            }
+            let url = format!("{}/models/{}:generateContent", p.base, model.trim_start_matches("models/"));
+            let v = send(c.post(url).header("x-goog-api-key", key).json(&body)).await?;
+            join_text(v.pointer("/candidates/0/content/parts"))
+        }
+        Api::Anthropic => {
+            let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
+            let body = json!({"model": model, "max_tokens": 4096, "system": system, "messages": msgs});
+            let v = send(
+                c.post(format!("{}/messages", p.base))
+                    .header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01")
+                    .json(&body),
+            )
+            .await?;
+            join_text(v.get("content"))
+        }
+    };
+    Ok(text)
+}
+
 #[tauri::command]
 pub async fn ai_check(req: CheckRequest) -> Result<Vec<Issue>, String> {
     if req.text.trim().is_empty() {
@@ -148,56 +205,59 @@ pub async fn ai_check(req: CheckRequest) -> Result<Vec<Issue>, String> {
     }
     let p = provider(&req.provider, req.base_url.as_deref())?;
     let key = secrets::get(&req.provider)?;
-    let c = client()?;
-    let text = match p.api {
-        Api::OpenAiLike => {
-            let mut body = json!({
-                "model": req.model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt(&req)}
-                ]
-            });
-            if p.json_mode {
-                body["response_format"] = json!({"type": "json_object"});
-            }
-            let v = send(c.post(format!("{}/chat/completions", p.base)).bearer_auth(&key).json(&body)).await?;
-            v.pointer("/choices/0/message/content").and_then(|x| x.as_str()).unwrap_or("").to_string()
-        }
-        Api::Gemini => {
-            let body = json!({
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                "contents": [{"role": "user", "parts": [{"text": user_prompt(&req)}]}],
-                "generationConfig": {"responseMimeType": "application/json"}
-            });
-            let url = format!("{}/models/{}:generateContent", p.base, req.model.trim_start_matches("models/"));
-            let v = send(c.post(url).header("x-goog-api-key", &key).json(&body)).await?;
-            v.pointer("/candidates/0/content/parts")
-                .and_then(|x| x.as_array())
-                .map(|parts| parts.iter().filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(""))
-                .unwrap_or_default()
-        }
-        Api::Anthropic => {
-            let body = json!({
-                "model": req.model,
-                "max_tokens": 4096,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": user_prompt(&req)}]
-            });
-            let v = send(
-                c.post(format!("{}/messages", p.base))
-                    .header("x-api-key", &key)
-                    .header("anthropic-version", "2023-06-01")
-                    .json(&body),
-            )
-            .await?;
-            v.get("content")
-                .and_then(|x| x.as_array())
-                .map(|parts| parts.iter().filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(""))
-                .unwrap_or_default()
-        }
-    };
+    let msgs = [Message { role: "user".into(), content: user_prompt(&req) }];
+    let text = complete(&p, &key, &req.model, SYSTEM_PROMPT, &msgs, true, 60).await?;
     parse_issues(&text)
+}
+
+#[derive(Deserialize)]
+pub struct ChatRequest {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub messages: Vec<Message>,
+    /// 参照するノート（名前と本文）。None なら参照しない
+    pub note_name: Option<String>,
+    pub note_text: Option<String>,
+}
+
+const CHAT_PROMPT: &str = "あなたは学習を手伝うアシスタントです。日本語で、簡潔かつ正確に答えてください。\n\
+回答はMarkdownで書けます。重要な語句を ==語句== で囲むと、ユーザーのノートアプリの暗記モードで隠せる形になります（確認問題やまとめを作るときに使ってください）。\n\
+わからないことや確信が持てないことは、そう伝えてください。";
+
+pub fn chat_system(note_name: Option<&str>, note_text: Option<&str>) -> String {
+    match note_text {
+        Some(t) if !t.trim().is_empty() => format!(
+            "{CHAT_PROMPT}\n\nユーザーは次のノートを見ながら質問しています。必要に応じて参照してください。\n<note name=\"{}\">\n{}\n</note>",
+            note_name.unwrap_or("ノート"),
+            t
+        ),
+        _ => CHAT_PROMPT.to_string(),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_chat(req: ChatRequest) -> Result<String, String> {
+    if req.model.trim().is_empty() {
+        return Err("モデルが選ばれていません。設定画面で選んでください".into());
+    }
+    let msgs: Vec<Message> = req
+        .messages
+        .into_iter()
+        .filter(|m| !m.content.trim().is_empty())
+        .map(|m| Message { role: if m.role == "assistant" { "assistant".into() } else { "user".into() }, content: m.content })
+        .collect();
+    if msgs.last().map(|m| m.role.as_str()) != Some("user") {
+        return Err("送信するメッセージがありません".into());
+    }
+    let p = provider(&req.provider, req.base_url.as_deref())?;
+    let key = secrets::get(&req.provider)?;
+    let system = chat_system(req.note_name.as_deref(), req.note_text.as_deref());
+    let text = complete(&p, &key, &req.model, &system, &msgs, false, 120).await?;
+    if text.trim().is_empty() {
+        return Err("AIから空の返答が返りました".into());
+    }
+    Ok(text)
 }
 
 /// 文章生成に使わないモデルを OpenAI の一覧から除く。
@@ -214,7 +274,7 @@ pub fn is_text_model(id: &str) -> bool {
 pub async fn ai_list_models(provider_id: String, base_url: Option<String>) -> Result<Vec<String>, String> {
     let p = provider(&provider_id, base_url.as_deref())?;
     let key = secrets::get(&provider_id)?;
-    let c = client()?;
+    let c = client(30)?;
     let mut ids: Vec<String> = match p.api {
         Api::OpenAiLike => {
             let v = send(c.get(format!("{}/models", p.base)).bearer_auth(&key)).await?;
@@ -290,6 +350,14 @@ mod tests {
         assert!(is_text_model("gpt-5.6-luna"));
         assert!(!is_text_model("text-embedding-3-small"));
         assert!(!is_text_model("gpt-4o-mini-tts"));
+    }
+
+    #[test]
+    fn chat_system_includes_note() {
+        let s = chat_system(Some("元寇"), Some("# 元寇\n- 文永の役"));
+        assert!(s.contains("<note name=\"元寇\">"));
+        assert!(s.contains("文永の役"));
+        assert!(!chat_system(None, Some("  ")).contains("<note"));
     }
 
     #[test]
