@@ -73,6 +73,7 @@ export function openQuickSwitcher(onPick: (path: string, other: boolean) => void
     render();
   });
   input.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // 日本語変換中
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = Math.min(items.length - 1, index + 1);

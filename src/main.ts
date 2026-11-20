@@ -353,6 +353,12 @@ class App {
   }
 
   handleKey(e: KeyboardEvent): void {
+    if (e.isComposing || e.keyCode === 229) return; // 日本語変換中
+    // 再読み込みで編集中の内容を失わないように
+    if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) {
+      e.preventDefault();
+      return;
+    }
     if (document.querySelector(".overlay")) return; // ダイアログ表示中
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();

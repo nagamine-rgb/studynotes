@@ -392,6 +392,7 @@ export class Explorer {
     };
     input.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return; // 日本語変換中の Enter は確定に使う
       if (e.key === "Enter") void finish(true);
       if (e.key === "Escape") void finish(false);
     });
