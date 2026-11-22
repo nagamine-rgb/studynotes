@@ -416,8 +416,14 @@ async function main(): Promise<void> {
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
   const win = getCurrentWindow();
+  // 閉じる前に入力中のノートを保存する。保存に失敗しても閉じられるようにする
+  // （閉じる処理自体は capabilities の core:window:allow-destroy が必要）
   void win.onCloseRequested(async () => {
-    await app.flushAll();
+    try {
+      await Promise.race([app.flushAll(), new Promise((r) => setTimeout(r, 3000))]);
+    } catch {
+      /* 保存エラーはトーストで通知済み */
+    }
   });
   if (settings.vaultPath) await app.openVault(settings.vaultPath);
   else showWelcome(app);

@@ -29,6 +29,8 @@ class Vault {
     const [entries, files] = await Promise.all([api.vaultList(), api.vaultReadAll()]);
     this.entries = entries;
     this.notes = new Map(files.map((f) => [f.path, f.content]));
+    this.written.clear();
+    for (const f of files) this.remember(f.path, f.content); // 読み込んだ時点の内容も「既知」とする
     this.emit();
   }
 
@@ -45,7 +47,8 @@ class Vault {
       }
       try {
         const c = await api.noteRead(p);
-        if (this.written.get(p) === c) continue; // 自分の保存
+        if (this.isOwnWrite(p, c)) continue; // 自分の保存、または既に知っている内容
+        this.remember(p, c);
         if (this.notes.get(p) !== c) {
           this.notes.set(p, c);
           updated.push(p);
@@ -59,7 +62,9 @@ class Vault {
     for (const e of this.entries) {
       if (!e.is_dir && e.path.toLowerCase().endsWith(".md") && !this.notes.has(e.path)) {
         try {
-          this.notes.set(e.path, await api.noteRead(e.path));
+          const c = await api.noteRead(e.path);
+          this.notes.set(e.path, c);
+          this.remember(e.path, c);
           updated.push(e.path);
         } catch {
           /* 無視 */
@@ -98,11 +103,25 @@ class Vault {
     return out.sort((a, b) => a.localeCompare(b, "ja"));
   }
 
-  /** アプリ自身が最後に書いた内容（監視イベントで自分の保存を外部変更と取り違えないため） */
-  private written = new Map<string, string>();
+  /**
+   * アプリ自身が最近書いた内容（監視イベントで自分の保存を外部変更と取り違えないため）。
+   * 短い間隔で何度か保存すると、古い保存の通知が後から届くので、最後の1件だけでなく数件覚えておく。
+   */
+  private written = new Map<string, string[]>();
+
+  private remember(path: string, content: string): void {
+    const list = this.written.get(path) ?? [];
+    list.push(content);
+    if (list.length > 10) list.shift();
+    this.written.set(path, list);
+  }
+
+  isOwnWrite(path: string, content: string): boolean {
+    return this.written.get(path)?.includes(content) ?? false;
+  }
 
   async write(path: string, content: string): Promise<void> {
-    this.written.set(path, content);
+    this.remember(path, content);
     await api.noteWrite(path, content);
     this.notes.set(path, content);
   }
@@ -115,7 +134,7 @@ class Vault {
     const taken = (p: string) => this.entries.some((e) => e.path.toLowerCase() === p.toLowerCase());
     while (taken(path)) path = joinPath(dir, `${base} ${++n}.md`);
     const content = body ?? `# ${noteName(path)}\n\n`;
-    this.written.set(path, content);
+    this.remember(path, content);
     await api.noteCreate(path, content);
     this.notes.set(path, content);
     this.entries = await api.vaultList();
