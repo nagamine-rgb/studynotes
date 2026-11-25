@@ -97,13 +97,12 @@ if (existsSync(join(root, "keystore.properties"))) {
     if (s.includes('signingConfigs.getByName("release")')) return s;
     must(s, "buildTypes {", gradle);
     must(s, 'getByName("release") {', gradle);
-    if (!s.includes("import java.util.Properties")) s = `import java.util.Properties\nimport java.io.FileInputStream\n${s}`;
     s = s.replace(
       "buildTypes {",
       `signingConfigs {
         create("release") {
-            val props = Properties()
-            props.load(FileInputStream(rootProject.file("keystore.properties")))
+            val props = java.util.Properties()
+            props.load(java.io.FileInputStream(rootProject.file("keystore.properties")))
             keyAlias = props["keyAlias"] as String
             keyPassword = props["password"] as String
             storeFile = file(props["storeFile"] as String)
