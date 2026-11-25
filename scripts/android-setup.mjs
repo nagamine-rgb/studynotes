@@ -97,16 +97,25 @@ if (existsSync(join(root, "keystore.properties"))) {
     if (s.includes('signingConfigs.getByName("release")')) return s;
     must(s, "buildTypes {", gradle);
     must(s, 'getByName("release") {', gradle);
+    must(s, "android {", gradle);
+    // android { } の中では "java" が Java の設定を指してしまうので、import して外側で読み込む
+    for (const imp of ["import java.util.Properties", "import java.io.FileInputStream"]) {
+      if (!new RegExp(`^${imp.replace(/\./g, "\\.")}\\s*$`, "m").test(s)) s = `${imp}\n${s}`;
+    }
+    s = s.replace(
+      "android {",
+      `val studynotesKeystore = Properties().apply { load(FileInputStream(rootProject.file("keystore.properties"))) }
+
+android {`,
+    );
     s = s.replace(
       "buildTypes {",
       `signingConfigs {
         create("release") {
-            val props = java.util.Properties()
-            props.load(java.io.FileInputStream(rootProject.file("keystore.properties")))
-            keyAlias = props["keyAlias"] as String
-            keyPassword = props["password"] as String
-            storeFile = file(props["storeFile"] as String)
-            storePassword = props["password"] as String
+            keyAlias = studynotesKeystore["keyAlias"] as String
+            keyPassword = studynotesKeystore["password"] as String
+            storeFile = file(studynotesKeystore["storeFile"] as String)
+            storePassword = studynotesKeystore["password"] as String
         }
     }
     buildTypes {`,
