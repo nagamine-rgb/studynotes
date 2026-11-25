@@ -58,6 +58,6 @@ npm run tauri build    # インストーラーを作成（Windows 上で実行�
 
 1. `package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の版番号を上げる
 2. `docs/releases/v<版番号>.md` に変更点を書く
-3. `git tag v<版番号> && git push origin v<版番号>` → GitHub Actions がビルドし、Releases に自動で公開する
+3. main に push → GitHub Actions がビルドし、その版のリリースがまだなければ、タグ `v<版番号>` を付けて Releases に自動で公開する
 
 構成：Tauri 2（Rust）＋ TypeScript ＋ Vite、エディタは CodeMirror 6、表示は markdown-it。

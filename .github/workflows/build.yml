@@ -67,12 +67,33 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # main に新しい版番号が入ったら、タグ v<版番号> を付けて Releases に公開する
+      - name: Decide release
+        id: rel
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v${version}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if gh release view "${tag}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release ${tag} already exists"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            test -f "docs/releases/${tag}.md" || { echo "::error::docs/releases/${tag}.md がありません（リリースの変更点を書いてください）"; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish release
+        if: steps.rel.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: StudyNotes ${{ github.ref_name }}
-          body_path: docs/releases/${{ github.ref_name }}.md
+          tag_name: ${{ steps.rel.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: StudyNotes ${{ steps.rel.outputs.tag }}
+          body_path: docs/releases/${{ steps.rel.outputs.tag }}.md
+          make_latest: true
           files: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
