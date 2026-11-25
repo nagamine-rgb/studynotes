@@ -36,11 +36,9 @@ export const defaultSettings = (): Settings => ({
 });
 
 export type PaneId = "L" | "R";
-export type Mode = "edit" | "read";
 
 export interface PaneState {
   path: string | null;
-  mode: Mode;
   masked: boolean;
 }
 
@@ -62,7 +60,7 @@ export const defaultWorkspace = (): Workspace => ({
   active: "L",
   explorerVisible: true,
   explorerWidth: 260,
-  panes: { L: { path: null, mode: "read", masked: false }, R: { path: null, mode: "read", masked: false } },
+  panes: { L: { path: null, masked: false }, R: { path: null, masked: false } },
   openFolders: [],
   pins: [],
   recent: [],

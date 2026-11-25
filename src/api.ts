@@ -23,6 +23,7 @@ export const api = {
   workspaceSave: (json: string) => invoke<void>("workspace_save", { json }),
   settingsLoad: () => invoke<string | null>("settings_load"),
   settingsSave: (json: string) => invoke<void>("settings_save", { json }),
+  attachmentImport: (path: string) => invoke<string>("attachment_import", { path }),
   attachmentSave: (name: string, dataBase64: string) => invoke<string>("attachment_save", { name, dataBase64 }),
   secretSet: (provider: string, key: string) => invoke<void>("secret_set", { provider, key }),
   secretHas: (provider: string) => invoke<boolean>("secret_has", { provider }),

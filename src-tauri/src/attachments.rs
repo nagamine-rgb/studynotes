@@ -50,7 +50,32 @@ pub fn attachment_save(state: State<AppState>, name: String, data_base64: String
     let data = base64::engine::general_purpose::STANDARD
         .decode(data_base64.as_bytes())
         .map_err(|_| "画像データを読み取れません".to_string())?;
-    let mut desired = sanitize_file_name(&name);
+    save(&root, &name, &data)
+}
+
+/// パソコン上の画像ファイルを attachments にコピーする（ファイル選択ダイアログから）
+#[tauri::command]
+pub fn attachment_import(state: State<AppState>, path: String) -> Result<String, String> {
+    let root = root_of(&state)?;
+    let src = std::path::PathBuf::from(&path);
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("ファイル名がありません")?;
+    let ext = split_name(&name).1.trim_start_matches('.').to_lowercase();
+    if !IMAGE_EXTS.contains(&ext.as_str()) {
+        return Err(format!("画像ファイルではありません: {name}"));
+    }
+    let meta = fs::metadata(&src).map_err(|e| format!("ファイルを開けません: {e}"))?;
+    if meta.len() > 50 * 1024 * 1024 {
+        return Err("画像が大きすぎます（50MBまで）".into());
+    }
+    let data = fs::read(&src).map_err(|e| format!("ファイルを読めません: {e}"))?;
+    save(&root, &name, &data)
+}
+
+fn save(root: &Path, name: &str, data: &[u8]) -> Result<String, String> {
+    let mut desired = sanitize_file_name(name);
     let ext = split_name(&desired).1.trim_start_matches('.').to_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
         if ext.is_empty() {
@@ -61,9 +86,9 @@ pub fn attachment_save(state: State<AppState>, name: String, data_base64: String
     }
     let dir = root.join(ATTACH_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("attachments フォルダを作れません: {e}"))?;
-    let (file, needs_write) = choose_name(&dir, &desired, &data);
+    let (file, needs_write) = choose_name(&dir, &desired, data);
     if needs_write {
-        write_atomic(&dir.join(&file), &data)?;
+        write_atomic(&dir.join(&file), data)?;
     }
     Ok(file)
 }

@@ -1,27 +1,18 @@
 // 編集モードのエディタ（CodeMirror 6）
-import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { autocompletion, startCompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { EditorSelection, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
-import {
-  Decoration,
-  type DecorationSet,
-  drawSelection,
-  EditorView,
-  hoverTooltip,
-  keymap,
-  placeholder,
-  ViewPlugin,
-  type ViewUpdate,
-} from "@codemirror/view";
+import { EditorSelection, EditorState, Prec, RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Decoration, type DecorationSet, drawSelection, EditorView, hoverTooltip, keymap, placeholder } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { parseLink, WIKILINK_RE } from "./lib/links";
+import { livePreview, refreshPreview, type LivePreviewOptions } from "./livepreview";
 import type { LocatedIssue } from "./lib/issues";
 import { toggleHighlight } from "./lib/text";
 
-export interface EditorOptions {
+export interface EditorOptions extends Omit<LivePreviewOptions, "openLink"> {
   onChange(text: string, changes: { from: number; to: number; insertedLength: number }[]): void;
   /** リンクを開く（other=true なら反対側のペイン） */
   onOpenLink(target: string, heading: string | null, other: boolean): void;
@@ -32,11 +23,16 @@ export interface EditorOptions {
   onFocus(): void;
 }
 
+/** 選択範囲が「開き記号＋文字＋閉じ記号」で囲まれているか */
+function isWrapped(doc: string, from: number, to: number, open: string, close: string): "inside" | "outside" | null {
+  const sel = doc.slice(from, to);
+  if (sel.length >= open.length + close.length && sel.startsWith(open) && sel.endsWith(close)) return "inside";
+  if (doc.slice(from - open.length, from) === open && doc.slice(to, to + close.length) === close) return "outside";
+  return null;
+}
+
 const highlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: "1.6em", fontWeight: "700" },
-  { tag: t.heading2, fontSize: "1.3em", fontWeight: "700" },
-  { tag: t.heading3, fontSize: "1.12em", fontWeight: "700" },
-  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: "700" },
+  { tag: [t.heading1, t.heading2, t.heading3, t.heading4, t.heading5, t.heading6], fontWeight: "700" },
   { tag: t.strong, fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
@@ -47,56 +43,7 @@ const highlight = HighlightStyle.define([
   { tag: t.quote, color: "var(--muted)", fontStyle: "italic" },
 ]);
 
-// ==強調== {{穴埋め}} [[リンク]] の装飾
-function buildMarks(view: EditorView, linkExists: (t: string) => boolean): DecorationSet {
-  const ranges: { from: number; to: number; deco: Decoration }[] = [];
-  for (const { from, to } of view.visibleRanges) {
-    const text = view.state.doc.sliceString(from, to);
-    for (const m of text.matchAll(/==([^=\n]+)==/g)) {
-      const s = from + (m.index ?? 0);
-      ranges.push({ from: s, to: s + m[0].length, deco: Decoration.mark({ class: "cm-hl" }) });
-    }
-    for (const m of text.matchAll(/\{\{([^{}\n]+)\}\}/g)) {
-      const s = from + (m.index ?? 0);
-      ranges.push({ from: s, to: s + m[0].length, deco: Decoration.mark({ class: "cm-cloze" }) });
-    }
-    for (const m of text.matchAll(WIKILINK_RE)) {
-      const s = from + (m.index ?? 0);
-      const embed = m[1] === "!";
-      const ok = embed || linkExists(parseLink(m[2]).target);
-      ranges.push({
-        from: s,
-        to: s + m[0].length,
-        deco: Decoration.mark({
-          class: embed ? "cm-embed" : ok ? "cm-wl" : "cm-wl cm-missing",
-          attributes: embed ? {} : { title: "Ctrl+クリックで反対側に開く／Ctrl+Enterでこのペインに開く" },
-        }),
-      });
-    }
-  }
-  ranges.sort((a, b) => a.from - b.from || a.to - b.to);
-  const b = new RangeSetBuilder<Decoration>();
-  for (const r of ranges) b.add(r.from, r.to, r.deco);
-  return b.finish();
-}
 
-function marksPlugin(linkExists: (t: string) => boolean) {
-  return ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet;
-      constructor(view: EditorView) {
-        this.decorations = buildMarks(view, linkExists);
-      }
-      update(u: ViewUpdate) {
-        if (u.docChanged || u.viewportChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshLinks))))
-          this.decorations = buildMarks(u.view, linkExists);
-      }
-    },
-    { decorations: (v) => v.decorations },
-  );
-}
-
-export const refreshLinks = StateEffect.define<null>();
 
 /** pos を含む [[…]] を探す */
 function linkAt(state: EditorState, pos: number): { target: string; heading: string | null } | null {
@@ -214,7 +161,23 @@ export class NoteEditor {
       search({ top: true }),
       highlightSelectionMatches(),
       placeholder("ここに書きます。[[ でリンク、==キーワード== で暗記用の強調"),
-      marksPlugin(opts.linkExists),
+      livePreview({ ...opts, openLink: opts.onOpenLink }),
+      // 空のリスト項目で Enter → リストを抜ける（UpNote・Word と同じ動き）
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Enter",
+            run: (v) => {
+              const sel = v.state.selection.main;
+              if (!sel.empty) return false;
+              const line = v.state.doc.lineAt(sel.head);
+              if (sel.head !== line.to || !/^\s*([-*+] \[[ xX]\]|[-*+]|\d+[.)]|>)\s*$/.test(line.text)) return false;
+              v.dispatch({ changes: { from: line.from, to: line.to, insert: "" }, selection: EditorSelection.cursor(line.from) });
+              return true;
+            },
+          },
+        ]),
+      ),
       issueField,
       issueTooltip(opts.onIssueAction),
       autocompletion({ override: [linkCompletion(opts.noteNames)], icons: false }),
@@ -230,6 +193,9 @@ export class NoteEditor {
             return true;
           },
         },
+        { key: "Mod-b", preventDefault: true, run: () => (this.wrap("**", "**"), true) },
+        { key: "Mod-i", preventDefault: true, run: () => (this.wrap("*", "*"), true) },
+        { key: "Mod-k", preventDefault: true, run: () => (this.insertLink(), true) },
         {
           key: "Mod-Enter",
           run: (v) => {
@@ -245,16 +211,6 @@ export class NoteEditor {
         ...defaultKeymap,
       ]),
       EditorView.domEventHandlers({
-        mousedown: (ev, v) => {
-          if (!(ev.ctrlKey || ev.metaKey) || ev.button !== 0) return false;
-          const pos = v.posAtCoords({ x: ev.clientX, y: ev.clientY });
-          if (pos == null) return false;
-          const l = linkAt(v.state, pos);
-          if (!l) return false;
-          ev.preventDefault();
-          opts.onOpenLink(l.target, l.heading, true);
-          return true;
-        },
         paste: (ev, v) => {
           const files = [...(ev.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
           if (!files.length) return false;
@@ -338,10 +294,104 @@ export class NoteEditor {
   }
 
   refreshLinks(): void {
-    this.view.dispatch({ effects: refreshLinks.of(null) });
+    this.view.dispatch({ effects: refreshPreview.of(null) });
   }
 
   focus(): void {
+    this.view.focus();
+  }
+
+  /** 選択範囲を記号で囲む／外す（選択がなければ記号の間にカーソル） */
+  wrap(open: string, close: string): void {
+    const v = this.view;
+    const { from, to } = v.state.selection.main;
+    const doc = v.state.doc.toString();
+    const w = isWrapped(doc, from, to, open, close);
+    if (w === "inside") {
+      const inner = doc.slice(from + open.length, to - close.length);
+      v.dispatch({ changes: { from, to, insert: inner }, selection: EditorSelection.range(from, from + inner.length) });
+    } else if (w === "outside") {
+      v.dispatch({
+        changes: [
+          { from: from - open.length, to: from, insert: "" },
+          { from: to, to: to + close.length, insert: "" },
+        ],
+        selection: EditorSelection.range(from - open.length, to - open.length),
+      });
+    } else {
+      v.dispatch({
+        changes: { from, to, insert: open + doc.slice(from, to) + close },
+        selection: EditorSelection.range(from + open.length, to + open.length),
+      });
+    }
+    v.focus();
+  }
+
+  /** 選択した行の先頭記号（"- " "1. " "> " など）を付ける／外す */
+  toggleLinePrefix(prefix: string): void {
+    const v = this.view;
+    const { from, to } = v.state.selection.main;
+    const first = v.state.doc.lineAt(from).number;
+    const last = v.state.doc.lineAt(to).number;
+    const lines = [];
+    for (let n = first; n <= last; n++) lines.push(v.state.doc.line(n));
+    const strip = /^(\s*)([-*+] \[[ xX]\] |[-*+] |\d+\. |> )/;
+    const all = lines.every((l) => l.text.replace(/^\s*/, "").startsWith(prefix.trim() === "1." ? "1. " : prefix) || (prefix === "1. " && /^\s*\d+\. /.test(l.text)));
+    const changes = lines.map((l, i) => {
+      const m = strip.exec(l.text);
+      const indent = /^\s*/.exec(l.text)![0];
+      const rest = m ? l.text.slice(m[0].length) : l.text.slice(indent.length);
+      const mark = prefix === "1. " ? `${i + 1}. ` : prefix;
+      return { from: l.from, to: l.to, insert: all ? indent + rest : indent + mark + rest };
+    });
+    v.dispatch({ changes });
+    v.focus();
+  }
+
+  /** 見出しの段階を変える（同じ段階を押すと外す） */
+  setHeading(level: number): void {
+    const v = this.view;
+    const line = v.state.doc.lineAt(v.state.selection.main.head);
+    const m = /^(#{1,6})\s+/.exec(line.text);
+    // 見出しにするときは、箇条書き・チェック・引用の記号を外す
+    const rest = m ? line.text.slice(m[0].length) : line.text.replace(/^\s*([-*+] \[[ xX]\] |[-*+] |\d+\. |> )/, "");
+    const insert = m && m[1].length === level ? rest : `${"#".repeat(level)} ${rest}`;
+    v.dispatch({ changes: { from: line.from, to: line.to, insert }, selection: EditorSelection.cursor(line.from + insert.length) });
+    v.focus();
+  }
+
+  /** カーソル位置に段落として挿入（前後に空行を入れる） */
+  insertBlock(text: string, cursorOffset?: number): void {
+    const v = this.view;
+    const pos = v.state.selection.main.to;
+    const doc = v.state.doc.toString();
+    const before = pos === 0 ? "" : doc[pos - 1] === "\n" ? (doc[pos - 2] === "\n" || pos === 1 ? "" : "\n") : "\n\n";
+    const insert = `${before}${text}\n`;
+    const caret = pos + before.length + (cursorOffset ?? text.length);
+    v.dispatch({ changes: { from: pos, insert }, selection: EditorSelection.cursor(caret) });
+    v.focus();
+  }
+
+  /** [[ を入れてノート名の候補を出す（選択中の文字があればそれをリンクにする） */
+  insertLink(): void {
+    const v = this.view;
+    const { from, to } = v.state.selection.main;
+    if (to > from) {
+      this.wrap("[[", "]]");
+      return;
+    }
+    v.dispatch({ changes: { from, insert: "[[]]" }, selection: EditorSelection.cursor(from + 2) });
+    v.focus();
+    startCompletion(v);
+  }
+
+  undo(): void {
+    undo(this.view);
+    this.view.focus();
+  }
+
+  redo(): void {
+    redo(this.view);
     this.view.focus();
   }
 }

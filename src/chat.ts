@@ -61,11 +61,10 @@ export class ChatView {
       e.stopPropagation();
     });
     this.sendBtn = h("button", { class: "btn primary", type: "button", onclick: () => void this.send(this.input.value) }, "送信");
-    const clearBtn = h("button", { class: "btn small", type: "button", onclick: () => this.clear() }, "会話をクリア");
     this.el = h(
       "div",
       { class: "chat-view" },
-      h("div", { class: "chat-context" }, h("label", { class: "check" }, this.useNote, this.noteLabel), clearBtn),
+      h("div", { class: "chat-context" }, h("label", { class: "check" }, this.useNote, this.noteLabel)),
       this.listEl,
       h("div", { class: "chat-compose" }, this.chips, h("div", { class: "chat-row" }, this.input, this.sendBtn)),
     );
@@ -157,10 +156,11 @@ export class ChatView {
       toast("挿入先のノートが開かれていません", "error");
       return;
     }
-    const wasEdit = pane.mode === "edit";
-    if (!wasEdit) pane.setMode("edit");
+    if (pane.masked) pane.setMasked(false);
     const doc = pane.editor.getText();
-    const pos = wasEdit ? pane.editor.selection().to : doc.length;
+    // カーソルを置いていなければ（先頭のまま）ノートの末尾に入れる
+    const sel = pane.editor.selection().to;
+    const pos = sel === 0 && doc.length > 0 ? doc.length : sel;
     const before = pos > 0 && doc[pos - 1] !== "\n" ? "\n\n" : pos > 0 ? "\n" : "";
     pane.editor.insertAt(pos, `${before}${text.trim()}\n`);
     toast(`「${noteName(pane.path)}」に挿入しました`);
@@ -190,7 +190,7 @@ export class ChatView {
         h(
           "div",
           { class: "msg-actions" },
-          h("button", { class: "btn small", type: "button", "data-act": "insert", "data-i": i, title: "編集中ならカーソル位置、閲覧中ならノートの末尾に挿入" }, "ノートに挿入"),
+          h("button", { class: "btn small", type: "button", "data-act": "insert", "data-i": i, title: "カーソルの位置（置いていなければ末尾）に挿入" }, "ノートに挿入"),
           h("button", { class: "btn small", type: "button", "data-act": "copy", "data-i": i }, "コピー"),
         ),
       );
@@ -202,6 +202,7 @@ export class ChatView {
           "div",
           { class: "chat-empty muted" },
           h("p", {}, "ノートについて質問したり、要約や確認問題を作ってもらえます。"),
+          h("p", { class: "small" }, "会話はアプリを閉じるまで残ります。上の［履歴をクリア］で消せます。"),
           h("p", { class: "small" }, `使用中：${currentModel() || "モデル未設定"}`),
         ),
       );

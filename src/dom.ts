@@ -35,6 +35,19 @@ const ICONS: Record<string, string> = {
   forward: '<path d="M9 6l6 6-6 6"/>',
   pin: '<path d="M12 17v5M8 3h8l-1 6 3 3H6l3-3z"/>',
   sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  numbered: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4h1.5v4M3.5 8h3M3.5 13.5a1.5 1.5 0 1 1 2.6 1L3.5 17h3"/>',
+  checklist: '<rect x="3" y="4" width="6" height="6" rx="1"/><path d="M4.5 7l1.3 1.3L8 5.8"/><rect x="3" y="14" width="6" height="6" rx="1"/><path d="M13 7h8M13 17h8"/>',
+  quote: '<path d="M7 7h4v4c0 3-2 5-4 6M15 7h4v4c0 3-2 5-4 6"/>',
+  code: '<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>',
+  codeblock: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 10l-2 2 2 2M14 10l2 2-2 2"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 4v16"/>',
+  hr: '<path d="M3 12h18"/><path d="M7 7h10M7 17h10" opacity="0.35"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
+  marker: '<path d="M15 5l4 4-8 8H7v-4z"/><path d="M4 21h16" stroke-width="3" opacity="0.5"/>',
+  cloze: '<path d="M8 4c-2 0-2 2-2 4s-2 4-2 4 2 0 2 4 0 4 2 4M16 4c2 0 2 2 2 4s2 4 2 4-2 0-2 4 0 4-2 4"/>',
 };
 
 export function icon(name: keyof typeof ICONS | string, size = 16): SVGSVGElement {

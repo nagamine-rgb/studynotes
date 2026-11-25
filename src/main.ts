@@ -7,6 +7,7 @@ import { AiPanel } from "./aipanel";
 import { openQuickSwitcher, openSettings, pickVaultFolder } from "./dialogs";
 import { h, icon, iconButton, toast } from "./dom";
 import { Explorer } from "./explorer";
+import { FormatBar } from "./formatbar";
 import { dirName, noteName } from "./lib/links";
 import { Pane } from "./pane";
 import {
@@ -28,7 +29,7 @@ StudyNotes へようこそ。ノートはこのフォルダの中に、普通の
 ## 基本
 - 左のエクスプローラーでノートを選ぶと開きます。**Ctrl+クリック**で反対側のペインに開きます
 - **Ctrl+P** でノート名を検索、**Ctrl+Shift+F** で全文検索
-- **Ctrl+E** で 編集 ⇔ 閲覧 を切り替え。入力は自動で保存されます
+- 入力は自動で保存されます。書式は下のツールバーからも付けられます
 
 ## リンク
 編集中に [[ と打つとノート名の候補が出ます。例：[[暗記モードの使い方]]（まだないノートは、クリックすると作られます）
@@ -41,8 +42,8 @@ StudyNotes へようこそ。ノートはこのフォルダの中に、普通の
 ## 画像
 編集中にスクリーンショットを **Ctrl+V** で貼ると、attachments フォルダに保存されます。
 
-## AIチェック
-ペインの右上の「AI」ボタンで、誤字や表記ゆれを確認できます。⚙ 設定でAIサービスとAPIキーを選んでください。
+## AI
+上のメニューの「AI」ボタン（**Ctrl+Shift+A**）で、いま開いているノートの誤字チェックや、ノートについての質問ができます。⚙ 設定でAIサービスとAPIキーを選んでください。
 `;
 
 class App {
@@ -50,6 +51,8 @@ class App {
   panes: Record<PaneId, Pane>;
   explorer: Explorer;
   ai: AiPanel;
+  format: FormatBar;
+  private aiBtn: HTMLButtonElement;
   private statusMsg = h("span", { class: "status-msg" }, "準備完了");
   private statusCount = h("span", { class: "status-count" });
   private vaultLabel = h("span", { class: "vault-label" });
@@ -62,10 +65,18 @@ class App {
   constructor() {
     const host = {
       openLink: (from: Pane, target: string, heading: string | null, other: boolean) => void this.openLink(from, target, heading, other),
+      openPath: (from: Pane, path: string, other: boolean) => {
+        workspace.active = from.id;
+        void this.openPath(path, other);
+      },
       activate: (id: PaneId) => this.activate(id),
       changed: () => this.paneChanged(),
-      aiCheck: (p: Pane) => this.openAi(p),
-      textChanged: (p: Pane, c: { from: number; to: number; insertedLength: number }[]) => this.ai.textChanged(p, c),
+      textChanged: (p: Pane, c: { from: number; to: number; insertedLength: number }[]) => {
+        // 同じノートをもう一方のペインでも開いていれば、そちらにも反映する
+        const other = this.other(p.id);
+        if (other.path && other.path === p.path) other.syncFrom(p);
+        this.ai.textChanged(p, c);
+      },
       issueAction: (p: Pane, id: number, a: "accept" | "ignore") => this.ai.issueAction(p, id, a),
       setStatus: (m: string) => (this.statusMsg.textContent = m),
     };
@@ -74,6 +85,7 @@ class App {
       openPath: (p, other, line) => void this.openPath(p, other, line),
       activePaths: () => (Object.values(this.panes) as Pane[]).filter((p) => this.visible(p.id)).map((p) => p.path).filter((p): p is string => !!p),
       renamed: (map) => {
+        this.ai.renamed(map);
         for (const p of Object.values(this.panes)) p.renamed(map);
         this.refreshPreviews();
         this.paneChanged();
@@ -87,6 +99,7 @@ class App {
     this.ai = new AiPanel({
       setOpen: (open) => {
         this.root.classList.toggle("ai-open", open);
+        this.aiBtn.setAttribute("aria-pressed", String(open));
         if (open && settings.ai.collapseExplorer && workspace.explorerVisible) {
           this.root.classList.add("explorer-auto-hidden");
         }
@@ -94,19 +107,24 @@ class App {
       },
       openSettings: () => this.openSettings(),
       activePane: () => this.active,
+      panesShowing: (path) => (Object.values(this.panes) as Pane[]).filter((p) => p.path === path),
       openLink: (from, target, other) => void this.openLink(from, target, null, other),
+      isSplit: () => workspace.split,
     });
+    this.format = new FormatBar({ activePane: () => this.active });
+    this.aiBtn = h("button", { class: "btn ai-toggle", type: "button", title: "AI：チェックとチャット（Ctrl+Shift+A）", onclick: () => this.ai.toggle() }, icon("sparkle", 15), "AI");
 
     this.splitBtn = h("button", { class: "btn", type: "button", title: "1画面 ⇔ 2画面（Ctrl+\\）", onclick: () => this.toggleSplit() }, icon("split", 15), "2画面");
     const toolbar = h(
       "header",
       { class: "toolbar" },
-      iconButton("sidebar", "エクスプローラーの表示切替（Ctrl+B）", () => this.toggleExplorer()),
+      iconButton("sidebar", "エクスプローラーの表示切替（Ctrl+Shift+E）", () => this.toggleExplorer()),
       h("div", { class: "brand" }, h("strong", {}, "StudyNotes"), this.vaultLabel),
       h("div", { class: "spacer" }),
       h("button", { class: "btn", type: "button", title: "新規ノート（Ctrl+N）", onclick: () => void this.newNote() }, icon("plus", 15), "新規"),
       h("button", { class: "btn", type: "button", title: "ノート名で検索（Ctrl+P）", onclick: () => this.quickOpen() }, icon("search", 15), "検索", h("kbd", {}, "Ctrl+P")),
       this.splitBtn,
+      this.aiBtn,
       iconButton("settings", "設定（Ctrl+,）", () => this.openSettings()),
     );
     const explorerResizer = h("div", { class: "resizer", role: "separator", "aria-orientation": "vertical", title: "ドラッグで幅を変更" });
@@ -119,9 +137,10 @@ class App {
       this.statusMsg,
       this.statusCount,
       h("span", { class: "spacer" }),
-      h("span", { class: "hints" }, "Ctrl+クリック：反対側に開く ・ Ctrl+E：編集/閲覧 ・ Ctrl+M：暗記 ・ Ctrl+H：キーワード化"),
+      h("span", { class: "hints" }, "Ctrl+クリック：反対側に開く ・ Ctrl+M：暗記 ・ Ctrl+H：キーワード ・ Ctrl+Shift+A：AI"),
     );
-    this.root.append(toolbar, h("div", { class: "workspace" }, this.explorerWrap, this.panesEl, this.ai.el), status);
+    const center = h("div", { class: "center" }, this.panesEl, this.format.el);
+    this.root.append(toolbar, h("div", { class: "workspace" }, this.explorerWrap, center, this.ai.el), status);
 
     this.dragResize(explorerResizer, (x) => {
       workspace.explorerWidth = Math.min(480, Math.max(180, x));
@@ -192,10 +211,11 @@ class App {
 
   paneChanged(): void {
     for (const p of Object.values(this.panes)) {
-      workspace.panes[p.id] = { path: p.path, mode: p.mode, masked: p.masked };
-      this.ai.paneChanged(p);
+      workspace.panes[p.id] = { path: p.path, masked: p.masked };
+      this.ai.syncEditor(p);
     }
-    this.ai.refreshChat();
+    this.ai.refresh();
+    this.root.classList.toggle("active-masked", this.active.masked);
     saveWorkspace();
     this.explorer.render();
     const path = this.active.path;
@@ -206,7 +226,7 @@ class App {
     for (const p of Object.values(this.panes)) p.update();
   }
 
-  async openPath(path: string, other: boolean, line?: number, mode?: "edit" | "read"): Promise<void> {
+  async openPath(path: string, other: boolean, line?: number): Promise<void> {
     let target = this.active;
     if (other) {
       target = this.other(workspace.active);
@@ -214,11 +234,10 @@ class App {
     }
     workspace.active = target.id;
     this.applyLayout();
-    await target.open(path, { line, mode });
+    await target.open(path, { line });
     workspace.recent = [path, ...workspace.recent.filter((p) => p !== path)].slice(0, 20);
     this.explorer.reveal(path);
     this.paneChanged();
-    target.focus();
   }
 
   async openLink(from: Pane, target: string, heading: string | null, other: boolean): Promise<void> {
@@ -234,7 +253,7 @@ class App {
       const folder = target.includes("/") ? dirName(target) : dirName(from.path ?? "");
       try {
         const p = await vault.createNote(folder, target.includes("/") ? target.slice(target.lastIndexOf("/") + 1) : target);
-        await pane.open(p, { mode: "edit" });
+        await pane.open(p, { focus: true });
         toast(`「${noteName(p)}」を作成しました`);
         this.refreshPreviews();
       } catch (e) {
@@ -250,7 +269,8 @@ class App {
     const folder = vault.folderOf(this.active.path);
     try {
       const p = await vault.createNote(folder, name);
-      await this.openPath(p, false, undefined, "edit");
+      await this.openPath(p, false);
+      this.active.focus();
       this.refreshPreviews();
     } catch (e) {
       toast(errorText(e), "error");
@@ -285,12 +305,6 @@ class App {
     saveWorkspace();
   }
 
-  openAi(p: Pane): void {
-    workspace.active = p.id;
-    this.applyLayout();
-    this.ai.openFor(p);
-  }
-
   openSettings(): void {
     openSettings({
       changeVault: () => void this.chooseVault(),
@@ -319,7 +333,7 @@ class App {
     if (vault.notes.size === 0) {
       try {
         await vault.createNote("", "はじめに", WELCOME_NOTE);
-        workspace.panes.L = { path: "はじめに.md", mode: "read", masked: false };
+        workspace.panes.L = { path: "はじめに.md", masked: false };
       } catch {
         /* 無視 */
       }
@@ -329,8 +343,7 @@ class App {
     for (const id of ["L", "R"] as PaneId[]) {
       const st = workspace.panes[id];
       const p = st.path && vault.notes.has(st.path) ? st.path : null;
-      this.panes[id].masked = !!st.masked && !!p;
-      await this.panes[id].open(p, { history: false, mode: st.mode });
+      await this.panes[id].open(p, { history: false, masked: !!st.masked });
     }
     if (!this.panes.L.path && !this.panes.R.path) {
       const first = workspace.recent.find((p) => vault.notes.has(p)) ?? vault.notePaths()[0];
@@ -374,12 +387,11 @@ class App {
     if (mod && !e.shiftKey && k === "p") return run(() => this.quickOpen());
     if (mod && e.shiftKey && k === "f") return run(() => this.explorer.toggleSearch(true));
     if (mod && !e.shiftKey && k === "n") return run(() => void this.newNote());
-    if (mod && !e.shiftKey && k === "e") return run(() => this.active.toggleMode());
     if (mod && !e.shiftKey && k === "m") return run(() => this.active.toggleMask());
     if (mod && (k === "\\" || e.code === "IntlYen" || e.code === "Backslash")) return run(() => this.toggleSplit());
     if (mod && k === "tab") return run(() => workspace.split && this.activate(this.other(workspace.active).id));
-    if (mod && !e.shiftKey && k === "b") return run(() => this.toggleExplorer());
-    if (mod && e.shiftKey && k === "a") return run(() => this.openAi(this.active));
+    if (mod && e.shiftKey && k === "e") return run(() => this.toggleExplorer());
+    if (mod && e.shiftKey && k === "a") return run(() => this.ai.toggle());
     if (mod && k === ",") return run(() => this.openSettings());
     if (e.altKey && k === "arrowleft") return run(() => void this.active.goBack());
     if (e.altKey && k === "arrowright") return run(() => void this.active.goForward());

@@ -36,6 +36,7 @@ pub fn run() {
             vault::settings_load,
             vault::settings_save,
             attachments::attachment_save,
+            attachments::attachment_import,
             secrets::secret_set,
             secrets::secret_has,
             secrets::secret_delete,
