@@ -22,6 +22,17 @@
 
 > 署名のないアプリのため、初回は Windows SmartScreen の警告が出ることがあります。「詳細情報」→「実行」で起動できます。
 
+## Android 版（スマホ）
+
+PC 版から AI と 2画面を省いた、シンプルなスマホ版です（1パネル・編集・暗記・リンク・画像）。
+
+1. [Releases](https://github.com/nagamine-rgb/studynotes/releases/latest) から `StudyNotes_x.y.z_android.apk` をスマホでダウンロードしてインストール
+   （「提供元不明のアプリ」のインストールを許可する必要があります）
+2. 初回起動時に「すべてのファイルへのアクセス」の設定画面が開くので、StudyNotes を許可して戻る
+3. 「ノートフォルダを選ぶ」で、Dropsync などで同期しているフォルダ（例：`/storage/emulated/0/Dropsync/StudyNotes`）を選ぶ
+
+> 同じノートを PC とスマホで同時に編集すると、同期アプリが「競合コピー」を作ることがあります。片方で編集したら、同期が終わってからもう片方で開いてください。
+
 ## AIチェックの準備
 
 ⚙ 設定 → AIチェック で

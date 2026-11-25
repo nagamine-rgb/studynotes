@@ -2,7 +2,6 @@
 #[cfg(not(target_os = "android"))]
 use keyring::Entry;
 
-const SERVICE: &str = "StudyNotes";
 
 #[cfg(target_os = "android")]
 mod imp {
@@ -20,6 +19,8 @@ mod imp {
 #[cfg(not(target_os = "android"))]
 mod imp {
     use super::*;
+
+    const SERVICE: &str = "StudyNotes";
 
 fn entry(provider: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, provider).map_err(|e| format!("資格情報を扱えません: {e}"))

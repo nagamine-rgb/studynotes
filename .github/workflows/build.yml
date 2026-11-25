@@ -144,7 +144,11 @@ jobs:
             printf 'storeFile=%s\nkeyAlias=studynotes\npassword=%s\n' "$RUNNER_TEMP/studynotes.jks" "$KEY_PW" > src-tauri/gen/android/keystore.properties
             echo "signed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::署名の鍵（ANDROID_KEY_BASE64 / ANDROID_KEY_PASSWORD）が未登録のため、インストールできない未署名の APK になります"
+            # 鍵が未登録：署名の手順を確かめるため、使い捨ての鍵で署名する（リリースには載せない）
+            echo "::warning::署名の鍵（ANDROID_KEY_BASE64 / ANDROID_KEY_PASSWORD）が未登録のため、使い捨ての鍵で署名します（リリースには添付しません）"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/test.jks" -alias studynotes -keyalg RSA -keysize 2048 -validity 30 \
+              -storepass testpass -keypass testpass -dname "CN=StudyNotes Test" > /dev/null
+            printf 'storeFile=%s\nkeyAlias=studynotes\npassword=testpass\n' "$RUNNER_TEMP/test.jks" > src-tauri/gen/android/keystore.properties
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Configure Android project (permissions, signing)
@@ -156,10 +160,13 @@ jobs:
         run: |
           version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           src=$(ls src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk | head -1)
-          suffix=$([ "${{ steps.key.outputs.signed }}" = "true" ] && echo "" || echo "_unsigned")
+          suffix=$([ "${{ steps.key.outputs.signed }}" = "true" ] && echo "" || echo "_testkey")
           out="StudyNotes_${version}_android${suffix}.apk"
           cp "$src" "$out"
           ls -la "$out"
+          # 署名を確認（署名がないとインストールできない）
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$out" | head -3
           echo "file=$out" >> "$GITHUB_OUTPUT"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
