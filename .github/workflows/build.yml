@@ -125,9 +125,13 @@ jobs:
           workspaces: src-tauri
           key: android
       - run: npm ci
+      - name: Find Android NDK
+        run: |
+          ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          if [ -z "$ndk" ]; then ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1); fi
+          echo "NDK: $ndk"
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
       - name: Generate Android project
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: npx tauri android init --ci
       - name: Signing key
         id: key
@@ -146,8 +150,6 @@ jobs:
       - name: Configure Android project (permissions, signing)
         run: node scripts/android-setup.mjs
       - name: Build APK
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: npx tauri android build --apk --target aarch64 armv7
       - name: Collect APK
         id: apk
