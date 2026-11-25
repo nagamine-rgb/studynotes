@@ -16,9 +16,8 @@
 
 ## インストール
 
-1. GitHub の **Actions** タブ →「build」の最新の実行 → 下部の **Artifacts** から `StudyNotes-windows` をダウンロード
-   （`v0.1.0` のようなタグを付けると **Releases** にも自動で公開されます）
-2. 中の `StudyNotes_x.y.z_x64-setup.exe` を実行
+1. [Releases](https://github.com/nagamine-rgb/studynotes/releases/latest) の **Assets** から `StudyNotes_x.y.z_x64-setup.exe` をダウンロード
+2. ダウンロードしたファイルを実行（新しい版も同じ手順で上書きインストールできます。ノートは消えません）
 3. 初回起動時にノートを保存するフォルダを選ぶ
 
 > 署名のないアプリのため、初回は Windows SmartScreen の警告が出ることがあります。「詳細情報」→「実行」で起動できます。
@@ -54,5 +53,11 @@ npm test               # 画面側のテスト
 cd src-tauri && cargo test   # Rust 側のテスト
 npm run tauri build    # インストーラーを作成（Windows 上で実行）
 ```
+
+### リリースの手順
+
+1. `package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の版番号を上げる
+2. `docs/releases/v<版番号>.md` に変更点を書く
+3. `git tag v<版番号> && git push origin v<版番号>` → GitHub Actions がビルドし、Releases に自動で公開する
 
 構成：Tauri 2（Rust）＋ TypeScript ＋ Vite、エディタは CodeMirror 6、表示は markdown-it。
