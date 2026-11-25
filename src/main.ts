@@ -4,7 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { errorText } from "./api";
 import { AiPanel } from "./aipanel";
-import { openQuickSwitcher, openSettings, pickVaultFolder } from "./dialogs";
+import { api } from "./api";
+import { openFolderBrowser, openQuickSwitcher, openSettings, pickVaultFolder } from "./dialogs";
 import { h, icon, iconButton, toast } from "./dom";
 import { Explorer } from "./explorer";
 import { FormatBar } from "./formatbar";
@@ -61,8 +62,10 @@ class App {
   private divider: HTMLElement;
   private explorerWrap: HTMLElement;
   private unlisten: (() => void) | null = null;
+  private backdrop: HTMLElement;
 
-  constructor() {
+  /** mobile = スマホ版（1パネル・AIなし・エクスプローラーは引き出し） */
+  constructor(readonly mobile = false) {
     const host = {
       openLink: (from: Pane, target: string, heading: string | null, other: boolean) => void this.openLink(from, target, heading, other),
       openPath: (from: Pane, path: string, other: boolean) => {
@@ -140,7 +143,9 @@ class App {
       h("span", { class: "hints" }, "Ctrl+クリック：反対側に開く ・ Ctrl+M：暗記 ・ Ctrl+H：キーワード ・ Ctrl+Shift+A：AI"),
     );
     const center = h("div", { class: "center" }, this.panesEl, this.format.el);
-    this.root.append(toolbar, h("div", { class: "workspace" }, this.explorerWrap, center, this.ai.el), status);
+    this.backdrop = h("div", { class: "drawer-backdrop", onclick: () => this.closeDrawer() });
+    this.root.append(toolbar, h("div", { class: "workspace" }, this.explorerWrap, this.backdrop, center, this.ai.el), status);
+    if (mobile) this.root.classList.add("mobile");
 
     this.dragResize(explorerResizer, (x) => {
       workspace.explorerWidth = Math.min(480, Math.max(180, x));
@@ -239,7 +244,41 @@ class App {
     for (const p of Object.values(this.panes)) p.update();
   }
 
+  /** スマホ版：Android の戻るボタンで前のノートに戻れるよう、履歴に積む */
+  private pushHistory(): void {
+    if (this.mobile) history.pushState({ studynotes: true }, "");
+  }
+
+  closeDrawer(): void {
+    this.root.classList.remove("drawer-open");
+  }
+
+  /** Android の戻るボタン */
+  onBack(): void {
+    if (document.querySelector(".overlay")) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      history.pushState({ studynotes: true }, "");
+      return;
+    }
+    if (this.root.classList.contains("drawer-open")) {
+      this.closeDrawer();
+      history.pushState({ studynotes: true }, "");
+      return;
+    }
+    if (this.active.masked) {
+      this.active.setMasked(false);
+      history.pushState({ studynotes: true }, "");
+      return;
+    }
+    void this.active.goBack();
+  }
+
   async openPath(path: string, other: boolean, line?: number): Promise<void> {
+    if (this.mobile) {
+      other = false;
+      this.closeDrawer();
+    }
+    const prev = this.active.path;
     let target = this.active;
     if (other) {
       target = this.other(workspace.active);
@@ -248,12 +287,15 @@ class App {
     workspace.active = target.id;
     this.applyLayout();
     await target.open(path, { line });
+    if (path !== prev) this.pushHistory();
     workspace.recent = [path, ...workspace.recent.filter((p) => p !== path)].slice(0, 20);
     this.explorer.reveal(path);
     this.paneChanged();
   }
 
   async openLink(from: Pane, target: string, heading: string | null, other: boolean): Promise<void> {
+    if (this.mobile) other = false;
+    this.pushHistory();
     const resolved = vault.resolve(target, from.path);
     const pane = other ? this.other(from.id) : from;
     if (other && !workspace.split) workspace.split = true;
@@ -309,6 +351,11 @@ class App {
   }
 
   toggleExplorer(): void {
+    if (this.mobile) {
+      this.root.classList.toggle("drawer-open");
+      if (this.root.classList.contains("drawer-open")) this.pushHistory();
+      return;
+    }
     if (this.root.classList.contains("explorer-auto-hidden")) {
       this.root.classList.remove("explorer-auto-hidden");
       return;
@@ -322,10 +369,15 @@ class App {
     openSettings({
       changeVault: () => void this.chooseVault(),
       changed: () => this.refreshPreviews(),
+      mobile: this.mobile,
     });
   }
 
   async chooseVault(): Promise<void> {
+    if (this.mobile) {
+      openFolderBrowser(settings.vaultPath ?? "/storage/emulated/0", (p) => void this.openVault(p));
+      return;
+    }
     const p = await pickVaultFolder();
     if (p) await this.openVault(p);
   }
@@ -342,6 +394,10 @@ class App {
     settings.vaultPath = path;
     saveSettings();
     await loadWorkspace();
+    if (this.mobile) {
+      workspace.split = false;
+      workspace.active = "L";
+    }
     this.vaultLabel.textContent = vault.root;
     if (vault.notes.size === 0) {
       try {
@@ -421,7 +477,7 @@ function showWelcome(app: App): void {
     h(
       "div",
       { class: "welcome" },
-      h("div", { class: "welcome-card" }, h("h1", {}, "StudyNotes"), h("p", {}, "シンプルな学習用ノート"), h("p", { class: "muted" }, "ノートを保存するフォルダを選んでください。中のノートは普通の .md ファイルなので、ほかのアプリでも開けます。"), pick),
+      h("div", { class: "welcome-card" }, h("h1", {}, "StudyNotes"), h("p", {}, "シンプルな学習用ノート"), h("p", { class: "muted" }, app.mobile ? "Dropsync などで同期しているノートのフォルダを選んでください。" : "ノートを保存するフォルダを選んでください。中のノートは普通の .md ファイルなので、ほかのアプリでも開けます。"), pick),
     ),
   );
   pick.focus();
@@ -431,7 +487,14 @@ async function main(): Promise<void> {
   await loadSettings();
   applyTheme();
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-  const app = new App();
+  // スマホ版かどうか（ブラウザでの確認用に ?mobile でも切り替えられる）
+  const platform = await api.platform().catch(() => "other");
+  const mobile = platform === "android" || new URLSearchParams(location.search).has("mobile");
+  const app = new App(mobile);
+  if (mobile) {
+    history.replaceState({ studynotes: true }, "");
+    window.addEventListener("popstate", () => app.onBack());
+  }
   window.addEventListener("keydown", (e) => app.handleKey(e), true);
   // ブラウザ既定の右クリックメニューは入力欄以外で出さない
   window.addEventListener("contextmenu", (e) => {

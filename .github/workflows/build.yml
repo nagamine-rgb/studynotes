@@ -46,6 +46,8 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -97,3 +99,82 @@ jobs:
           files: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
+
+  # Android 版（APK）。署名の鍵は GitHub の Secrets に登録しておく：
+  #   ANDROID_KEY_BASE64 … keystore ファイルを base64 にしたもの
+  #   ANDROID_KEY_PASSWORD … keystore と鍵のパスワード
+  android:
+    needs: windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+      - run: npm ci
+      - name: Generate Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: npx tauri android init --ci
+      - name: Signing key
+        id: key
+        env:
+          KEY_B64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEY_B64" ] && [ -n "$KEY_PW" ]; then
+            echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/studynotes.jks"
+            printf 'storeFile=%s\nkeyAlias=studynotes\npassword=%s\n' "$RUNNER_TEMP/studynotes.jks" "$KEY_PW" > src-tauri/gen/android/keystore.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::署名の鍵（ANDROID_KEY_BASE64 / ANDROID_KEY_PASSWORD）が未登録のため、インストールできない未署名の APK になります"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure Android project (permissions, signing)
+        run: node scripts/android-setup.mjs
+      - name: Build APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: npx tauri android build --apk --target aarch64 armv7
+      - name: Collect APK
+        id: apk
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          src=$(ls src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk | head -1)
+          suffix=$([ "${{ steps.key.outputs.signed }}" = "true" ] && echo "" || echo "_unsigned")
+          out="StudyNotes_${version}_android${suffix}.apk"
+          cp "$src" "$out"
+          ls -la "$out"
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StudyNotes-android
+          path: ${{ steps.apk.outputs.file }}
+      # この版のリリースがあり、まだ APK が付いていなければ添付する（鍵の登録後の再実行でも付く）
+      - name: Attach APK to release
+        if: steps.key.outputs.signed == 'true' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.apk.outputs.tag }}"
+          if ! gh release view "$tag" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release $tag がまだないので添付しません"; exit 0
+          fi
+          if gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -q '_android\.apk$'; then
+            echo "Release $tag にはすでに APK があります"; exit 0
+          fi
+          gh release upload "$tag" "${{ steps.apk.outputs.file }}" --repo "${{ github.repository }}"

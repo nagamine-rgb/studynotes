@@ -448,3 +448,64 @@ code.path { font-family: var(--mono); font-size: 12px; background: var(--code-bg
 .ai-target { font-size: 13px; }
 .ai-open .pane.active { border-top-color: var(--accent); }
 .ai-open.split .pane.active .pane-header { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+
+/* ===== スマホ版 ===== */
+.drawer-backdrop { display: none; }
+.mobile { font-size: 14px; }
+.mobile .toolbar { padding: 4px 6px; gap: 2px; }
+.mobile .toolbar .brand .vault-label,
+.mobile .toolbar kbd,
+.mobile .toolbar .ai-toggle,
+.mobile .toolbar .btn[title^="1画面"] { display: none; }
+.mobile .toolbar .btn { height: 36px; padding: 0 10px; }
+.mobile .toolbar .icon-btn { width: 40px; height: 40px; }
+.mobile .statusbar, .mobile .ai-panel, .mobile .pane-divider, .mobile .resizer { display: none !important; }
+.mobile .pane[data-pane="R"] { display: none !important; }
+.mobile .pane[data-pane="L"] { flex: 1 1 auto !important; border-top: 0; }
+/* エクスプローラーは左から引き出す */
+.mobile .explorer-wrap {
+  display: flex !important; position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; width: min(86vw, 360px);
+  transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: var(--shadow);
+}
+.mobile.drawer-open .explorer-wrap { transform: none; }
+.mobile.drawer-open .drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 29; background: rgba(0, 0, 0, 0.35); }
+.mobile .explorer .row { height: 40px; font-size: 15px; }
+.mobile .explorer .icon-btn { width: 40px; height: 40px; }
+.mobile .explorer .input { height: 38px; font-size: 15px; }
+/* ペイン */
+.mobile .pane-header { padding: 4px 6px; }
+.mobile .pane-header .icon-btn { width: 36px; height: 36px; }
+.mobile .pane-path { display: none; }
+.mobile .pane-title { font-size: 15px; }
+.mobile .cm-content { padding: 0 16px !important; }
+.mobile .cm-scroller { padding-top: 10px !important; }
+.mobile .mask-scroll { padding: 14px 16px 40px; }
+.mobile .mask-bar { padding: 8px; }
+.mobile .mask-bar .btn { height: 36px; }
+.mobile .mask-label { display: none; }
+/* 書式バーは1行で横にスクロール */
+.mobile .formatbar { flex-wrap: nowrap; overflow-x: auto; padding: 4px 6px; scrollbar-width: none; }
+.mobile .formatbar::-webkit-scrollbar { display: none; }
+.mobile .fmt { min-width: 40px; height: 40px; flex: none; }
+/* ダイアログは下から出るシート風 */
+.mobile .overlay { padding-top: 0; align-items: flex-end; }
+.mobile .modal { width: 100vw; max-height: 88vh; border-radius: 14px 14px 0 0; }
+.mobile .modal.quick { max-height: 80vh; }
+.mobile .set-row { grid-template-columns: 1fr; gap: 4px; }
+.mobile .context-menu button { padding: 12px 16px; font-size: 15px; }
+.mobile .cm-image-resize { opacity: 1; }
+/* フォルダ選択画面 */
+.folder-browser { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
+.fb-body { padding: 4px 16px 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.fb-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-quick .chip { height: 32px; font-size: 13px; }
+.fb-path { font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 8px 10px; border-radius: 6px; overflow-wrap: anywhere; }
+.fb-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fb-item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); text-align: left; font-size: 15px; cursor: pointer; }
+.fb-item svg { color: #b7791f; }
+.fb-item.up { color: var(--accent); font-weight: 600; }
+.fb-item:last-child { border-bottom: 0; }
+.fb-error { padding: 12px 14px; color: var(--typo); line-height: 1.6; }
+.fb-foot { padding: 10px 16px 16px; border-top: 1px solid var(--border); }
+.fb-foot .btn { height: 44px; font-size: 15px; }
+.mobile.active-masked .formatbar { display: none; }

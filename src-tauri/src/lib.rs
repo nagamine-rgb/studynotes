@@ -12,6 +12,7 @@ pub struct AppState {
     pub watcher: Mutex<Option<watcher::VaultWatcher>>,
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -32,6 +33,8 @@ pub fn run() {
             vault::entry_delete,
             vault::abs_path,
             vault::open_in_default_app,
+            vault::list_dirs,
+            vault::platform,
             vault::workspace_load,
             vault::workspace_save,
             vault::settings_load,

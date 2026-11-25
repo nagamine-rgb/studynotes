@@ -2,7 +2,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorText } from "./api";
-import { h, toast } from "./dom";
+import { h, icon, toast } from "./dom";
 import { dirName, noteName } from "./lib/links";
 import { fuzzyScore } from "./lib/text";
 import { applyTheme, PROVIDERS, saveSettings, settings, type ProviderId } from "./settings";
@@ -96,12 +96,63 @@ export function openQuickSwitcher(onPick: (path: string, other: boolean) => void
   input.focus();
 }
 
+/** スマホ用：アプリ内でフォルダをたどって選ぶ画面 */
+export function openFolderBrowser(start: string, onPick: (path: string) => void): void {
+  const pathEl = h("div", { class: "fb-path" });
+  const info = h("div", { class: "muted small" });
+  const list = h("div", { class: "fb-list", role: "listbox" });
+  const useBtn = h("button", { class: "btn primary block", type: "button" }, "このフォルダを使う");
+  let current = start;
+  const quick = h(
+    "div",
+    { class: "fb-quick" },
+    ...[
+      ["内部ストレージ", "/storage/emulated/0"],
+      ["Dropsync", "/storage/emulated/0/Dropsync"],
+      ["Download", "/storage/emulated/0/Download"],
+      ["Documents", "/storage/emulated/0/Documents"],
+    ].map(([label, p]) => h("button", { class: "chip", type: "button", onclick: () => void go(p) }, label)),
+  );
+  const go = async (p: string) => {
+    try {
+      const l = await api.listDirs(p);
+      current = l.path;
+      pathEl.textContent = l.path;
+      info.textContent = l.notes ? `このフォルダの .md ファイル：${l.notes}件` : "このフォルダに .md ファイルはありません（サブフォルダは対象になります）";
+      list.replaceChildren(
+        ...(l.parent ? [h("button", { class: "fb-item up", type: "button", onclick: () => void go(l.parent!) }, "⬑ 上のフォルダへ")] : []),
+        ...l.dirs.map((d) => h("button", { class: "fb-item", type: "button", onclick: () => void go(`${l.path.replace(/\/$/, "")}/${d}`) }, icon("folder", 16), d)),
+      );
+      if (!l.dirs.length) list.append(h("div", { class: "muted small pad" }, "サブフォルダはありません"));
+      useBtn.disabled = false;
+    } catch (e) {
+      pathEl.textContent = p;
+      info.textContent = "";
+      list.replaceChildren(h("div", { class: "fb-error" }, errorText(e)));
+      useBtn.disabled = true;
+    }
+  };
+  useBtn.addEventListener("click", () => {
+    m.close();
+    onPick(current);
+  });
+  const body = h(
+    "div",
+    { class: "folder-browser" },
+    h("div", { class: "modal-head" }, h("h2", {}, "ノートフォルダを選ぶ"), h("button", { class: "btn", type: "button", onclick: () => m.close() }, "閉じる")),
+    h("div", { class: "fb-body" }, h("p", { class: "muted small" }, "Dropsync などで同期しているフォルダを選んでください。"), quick, pathEl, info, list),
+    h("div", { class: "fb-foot" }, useBtn),
+  );
+  const m = modal("ノートフォルダを選ぶ", body, "wide sheet");
+  void go(start);
+}
+
 export async function pickVaultFolder(): Promise<string | null> {
   const p = await openDialog({ directory: true, multiple: false, title: "ノートを保存するフォルダを選んでください" });
   return typeof p === "string" ? p : null;
 }
 
-export function openSettings(handlers: { changeVault: () => void; changed: () => void }): void {
+export function openSettings(handlers: { changeVault: () => void; changed: () => void; mobile?: boolean }): void {
   const section = (title: string, ...rows: HTMLElement[]) => h("section", { class: "set-section" }, h("h3", {}, title), ...rows);
   const row = (label: string, control: HTMLElement, note?: string) =>
     h("div", { class: "set-row" }, h("label", { class: "set-label" }, label), h("div", { class: "set-control" }, control, note ? h("div", { class: "muted small" }, note) : null));
@@ -259,7 +310,9 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
         "暗記モード",
         row("隠す対象", h("div", { class: "checks" }, check("==強調==", "highlight"), check("{{穴埋め}}", "cloze"), check("**太字**", "bold")), "ノートの先頭に mask: highlight, bold のように書くと、そのノートだけ変えられます"),
       ),
-      section(
+      handlers.mobile
+        ? h("div", {})
+        : section(
         "AI（チェック・チャット）",
         row("サービス", provider),
         row("モデル", h("div", { class: "inline" }, modelSelect, refreshBtn), undefined),
@@ -272,6 +325,6 @@ export function openSettings(handlers: { changeVault: () => void; changed: () =>
       ),
     ),
   );
-  const m = modal("設定", body, "wide");
+  const m = modal("設定", body, handlers.mobile ? "wide sheet" : "wide");
   void syncAi();
 }

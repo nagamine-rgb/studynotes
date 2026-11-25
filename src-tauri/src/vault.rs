@@ -200,7 +200,74 @@ pub fn entry_delete(state: State<AppState>, path: String) -> Result<(), String> 
     if abs == root {
         return Err("ノートフォルダ自体は削除できません".into());
     }
-    trash::delete(&abs).map_err(|e| format!("ごみ箱に移せません: {e}"))
+    remove_to_trash(&root, &abs)
+}
+
+#[cfg(not(target_os = "android"))]
+fn remove_to_trash(_root: &Path, abs: &Path) -> Result<(), String> {
+    trash::delete(abs).map_err(|e| format!("ごみ箱に移せません: {e}"))
+}
+
+/// Android にはごみ箱がないので、ノートフォルダ内の .studynote/trash に移す
+#[cfg(target_os = "android")]
+fn remove_to_trash(root: &Path, abs: &Path) -> Result<(), String> {
+    let dir = root.join(APP_DIR).join("trash");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    fs::rename(abs, dir.join(format!("{stamp}_{name}"))).map_err(|e| format!("削除できません: {e}"))
+}
+
+#[derive(Serialize)]
+pub struct DirListing {
+    pub path: String,
+    pub parent: Option<String>,
+    pub dirs: Vec<String>,
+    pub notes: usize,
+}
+
+/// フォルダ選択画面用：あるフォルダの中のフォルダ一覧と .md の数（スマホ版で使う）
+#[tauri::command]
+pub fn list_dirs(path: String) -> Result<DirListing, String> {
+    let p = PathBuf::from(&path);
+    let rd = fs::read_dir(&p).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            "このフォルダを読む権限がありません。Android の設定で「すべてのファイルへのアクセス」を許可してください".to_string()
+        } else {
+            format!("フォルダを開けません: {e}")
+        }
+    })?;
+    let mut dirs = Vec::new();
+    let mut notes = 0;
+    for item in rd.flatten() {
+        let name = item.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        match item.file_type() {
+            Ok(t) if t.is_dir() => dirs.push(name),
+            Ok(t) if t.is_file() && name.to_lowercase().ends_with(".md") => notes += 1,
+            _ => {}
+        }
+    }
+    dirs.sort_by_key(|d| d.to_lowercase());
+    Ok(DirListing {
+        parent: p.parent().map(|x| x.to_string_lossy().into_owned()).filter(|s| !s.is_empty()),
+        path: p.to_string_lossy().into_owned(),
+        dirs,
+        notes,
+    })
+}
+
+#[tauri::command]
+pub fn platform() -> &'static str {
+    if cfg!(target_os = "android") {
+        "android"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "other"
+    }
 }
 
 /// ノートフォルダ内のファイル（画像など）を Windows に関連付けられたアプリで開く
