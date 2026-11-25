@@ -48,6 +48,7 @@ export interface Workspace {
   active: PaneId;
   explorerVisible: boolean;
   explorerWidth: number;
+  aiWidth: number;
   panes: Record<PaneId, PaneState>;
   openFolders: string[];
   pins: string[];
@@ -60,6 +61,7 @@ export const defaultWorkspace = (): Workspace => ({
   active: "L",
   explorerVisible: true,
   explorerWidth: 260,
+  aiWidth: 360,
   panes: { L: { path: null, masked: false }, R: { path: null, masked: false } },
   openFolders: [],
   pins: [],

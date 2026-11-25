@@ -203,6 +203,20 @@ pub fn entry_delete(state: State<AppState>, path: String) -> Result<(), String> 
     trash::delete(&abs).map_err(|e| format!("ごみ箱に移せません: {e}"))
 }
 
+/// ノートフォルダ内のファイル（画像など）を Windows に関連付けられたアプリで開く
+#[tauri::command]
+pub fn open_in_default_app(app: AppHandle, state: State<AppState>, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let root = root_of(&state)?;
+    let abs = resolve(&root, &path)?;
+    if !abs.is_file() {
+        return Err("ファイルが見つかりません".into());
+    }
+    app.opener()
+        .open_path(display_path(&abs), None::<&str>)
+        .map_err(|e| format!("アプリで開けません: {e}"))
+}
+
 #[tauri::command]
 pub fn abs_path(state: State<AppState>, path: String) -> Result<String, String> {
     let root = root_of(&state)?;

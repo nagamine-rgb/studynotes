@@ -83,13 +83,20 @@ class Vault {
     return resolveLink(target, from, this.notes.keys());
   }
 
-  imageSrc(name: string): string | null {
+  /** 画像名（またはパス）から、ノートフォルダ内の相対パスを探す */
+  imagePath(name: string): string | null {
     const lower = name.toLowerCase();
     const hit =
       this.entries.find((e) => !e.is_dir && e.path.toLowerCase() === `attachments/${lower}`) ??
       this.entries.find((e) => !e.is_dir && fileName(e.path).toLowerCase() === lower) ??
       this.entries.find((e) => !e.is_dir && e.path.toLowerCase() === lower);
-    if (!hit) return null;
+    return hit?.path ?? null;
+  }
+
+  imageSrc(name: string): string | null {
+    const path = this.imagePath(name);
+    if (!path) return null;
+    const hit = { path };
     const sep = this.root.includes("\\") ? "\\" : "/";
     return convertFileSrc(`${this.root}${sep}${hit.path.split("/").join(sep)}`);
   }

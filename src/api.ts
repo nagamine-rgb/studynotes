@@ -19,6 +19,7 @@ export const api = {
   entryRename: (from: string, to: string) => invoke<void>("entry_rename", { from, to }),
   entryDelete: (path: string) => invoke<void>("entry_delete", { path }),
   absPath: (path: string) => invoke<string>("abs_path", { path }),
+  openInDefaultApp: (path: string) => invoke<void>("open_in_default_app", { path }),
   workspaceLoad: () => invoke<string | null>("workspace_load"),
   workspaceSave: (json: string) => invoke<void>("workspace_save", { json }),
   settingsLoad: () => invoke<string | null>("settings_load"),

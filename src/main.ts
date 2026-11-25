@@ -146,6 +146,18 @@ class App {
       workspace.explorerWidth = Math.min(480, Math.max(180, x));
       this.applyLayout();
     });
+    // AIパネルは左端をドラッグして幅を変える（ダブルクリックで元の幅）
+    const aiResizer = h("div", { class: "resizer ai-resizer", role: "separator", "aria-orientation": "vertical", title: "ドラッグで幅を変更／ダブルクリックで元の幅" });
+    this.ai.el.prepend(aiResizer);
+    this.dragResize(aiResizer, (x) => {
+      workspace.aiWidth = Math.round(Math.min(Math.max(280, window.innerWidth - x), Math.max(320, window.innerWidth * 0.6)));
+      this.applyLayout();
+    });
+    aiResizer.addEventListener("dblclick", () => {
+      workspace.aiWidth = 360;
+      this.applyLayout();
+      saveWorkspace();
+    });
     this.dragResize(this.divider, (x) => {
       const r = this.panesEl.getBoundingClientRect();
       workspace.ratio = Math.min(0.8, Math.max(0.2, (x - r.left) / r.width));
@@ -194,6 +206,7 @@ class App {
     this.root.classList.toggle("split", workspace.split);
     this.root.classList.toggle("explorer-hidden", !workspace.explorerVisible);
     this.root.style.setProperty("--explorer-w", `${workspace.explorerWidth}px`);
+    this.root.style.setProperty("--ai-w", `${workspace.aiWidth}px`);
     this.root.style.setProperty("--ratio", String(workspace.ratio));
     for (const p of Object.values(this.panes)) {
       p.el.classList.toggle("active", p.id === workspace.active && workspace.split);

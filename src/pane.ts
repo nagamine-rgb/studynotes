@@ -96,6 +96,7 @@ export class Pane {
         this.path ? vault.backlinks(this.path).map((p) => ({ path: p, label: noteName(p), dir: dirName(p) })) : [],
       openBacklink: (path, other) => this.host.openPath(this, path, other),
       openUrl: (url) => void openUrl(url),
+      openImage: (name) => this.openImage(name),
       noteNames: () => vault.notePaths().map(noteName),
       onImages: (files, pos) => void this.pasteImages(files, pos),
       onIssueAction: (id, action) => this.host.issueAction(this, id, action),
@@ -103,6 +104,10 @@ export class Pane {
     });
 
     this.article.addEventListener("click", (e) => this.onMaskClick(e));
+    this.article.addEventListener("dblclick", (e) => {
+      const img = (e.target as HTMLElement).closest<HTMLImageElement>("img.embed");
+      if (img) this.openImage(img.alt);
+    });
     this.update();
   }
 
@@ -281,6 +286,20 @@ export class Pane {
       this.editor.insertAt(pos, `${needsNl ? "\n" : ""}${insert}\n`);
     }
     toast("画像を attachments に保存しました");
+  }
+
+  /** 画像を Windows に関連付けられたアプリ（フォトなど）で開く */
+  openImage(name: string): void {
+    if (/^https?:\/\//i.test(name)) {
+      void openUrl(name);
+      return;
+    }
+    const path = vault.imagePath(name);
+    if (!path) {
+      toast(`画像が見つかりません: ${name}`, "error");
+      return;
+    }
+    api.openInDefaultApp(path).catch((e) => toast(errorText(e), "error"));
   }
 
   private onMaskClick(e: MouseEvent): void {

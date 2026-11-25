@@ -31,6 +31,7 @@ pub fn run() {
             vault::entry_rename,
             vault::entry_delete,
             vault::abs_path,
+            vault::open_in_default_app,
             vault::workspace_load,
             vault::workspace_save,
             vault::settings_load,

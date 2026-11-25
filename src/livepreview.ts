@@ -10,6 +10,8 @@ export interface LivePreviewOptions {
   openLink(target: string, heading: string | null, other: boolean): void;
   openBacklink(path: string, other: boolean): void;
   openUrl(url: string): void;
+  /** 画像を Windows に関連付けられたアプリで開く */
+  openImage(nameOrPath: string): void;
 }
 
 /** フォーカスの有無（フォーカスがないときはどの行も整形表示） */
@@ -17,18 +19,32 @@ export const setFocused = StateEffect.define<boolean>();
 /** ノートの増減などでリンクの色・バックリンクを描き直す */
 export const refreshPreview = StateEffect.define<null>();
 
+/** 本文中の ![[画像]] を探す（ウィジェットの位置から、その行の中で名前が一致するもの） */
+function findEmbed(view: EditorView, at: number, name: string): { from: number; to: number } | null {
+  const line = view.state.doc.lineAt(Math.min(at, view.state.doc.length));
+  for (const m of line.text.matchAll(/!\[\[([^\[\]\n]+)\]\]/g)) {
+    if (parseLink(m[1]).target === name) {
+      const from = line.from + (m.index ?? 0);
+      return { from, to: from + m[0].length };
+    }
+  }
+  return null;
+}
+
 class ImageWidget extends WidgetType {
   constructor(
     readonly name: string,
     readonly src: string | null,
     readonly width: string | null,
+    readonly opts: LivePreviewOptions,
+    readonly editable: boolean, // ![[…]] 形式なら大きさを変えられる
   ) {
     super();
   }
   eq(o: ImageWidget) {
-    return o.name === this.name && o.src === this.src && o.width === this.width;
+    return o.name === this.name && o.src === this.src && o.width === this.width && o.editable === this.editable;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const wrap = document.createElement("span");
     wrap.className = "cm-image";
     if (!this.src) {
@@ -36,13 +52,112 @@ class ImageWidget extends WidgetType {
       wrap.textContent = `画像が見つかりません: ${this.name}`;
       return wrap;
     }
+    const frame = document.createElement("span");
+    frame.className = "cm-image-frame";
+    let menu: HTMLElement | null = null;
+    const onOutside = (e: MouseEvent) => {
+      if (menu && !menu.contains(e.target as Node) && e.target !== img) closeMenu();
+    };
+    const closeMenu = () => {
+      menu?.remove();
+      menu = null;
+      document.removeEventListener("mousedown", onOutside, true);
+    };
     const img = document.createElement("img");
     img.src = this.src;
     img.alt = this.name;
     img.draggable = false;
-    if (this.width) img.style.width = `${this.width}px`;
-    wrap.append(img);
+    img.title = "クリックで大きさを選ぶ／ダブルクリックで画像ビューワーで開く";
+    // 大きさは枠の幅で決める（指定がなければ本文の幅いっぱい）
+    frame.style.width = this.width ? `${this.width}px` : "100%";
+    frame.append(img);
+    wrap.append(frame);
+    img.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      closeMenu();
+      this.opts.openImage(this.name);
+    });
+    if (!this.editable) return wrap;
+
+    // 本文の幅（左右の余白を除く）
+    const fullWidth = () => Math.max(120, Math.floor(view.contentDOM.getBoundingClientRect().width - 56));
+    const setWidth = (w: number | null) => {
+      const r = findEmbed(view, view.posAtDOM(wrap), this.name);
+      if (!r) return;
+      const insert = `![[${this.name}${w ? `|${w}` : ""}]]`;
+      view.dispatch({ changes: { from: r.from, to: r.to, insert } });
+    };
+
+    // 右下のつまみでドラッグして大きさを変える
+    const handle = document.createElement("span");
+    handle.className = "cm-image-resize";
+    handle.title = "ドラッグで大きさを変える";
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu();
+      handle.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startW = frame.getBoundingClientRect().width;
+      const max = fullWidth();
+      let w = startW;
+      const move = (ev: PointerEvent) => {
+        w = Math.min(max, Math.max(80, startW + ev.clientX - startX));
+        frame.style.width = `${w}px`;
+      };
+      const up = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        setWidth(w >= max - 4 ? null : Math.round(w / 10) * 10);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+    frame.append(handle);
+
+    // クリックで 小・中・大
+    img.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (menu) return closeMenu();
+      const full = fullWidth();
+      const current = this.width ? Number(this.width) : full;
+      const sizes: [string, number | null][] = [
+        ["小", Math.round(full / 3 / 10) * 10],
+        ["中", Math.round((full * 2) / 3 / 10) * 10],
+        ["大", null],
+      ];
+      menu = document.createElement("span");
+      menu.className = "cm-image-menu";
+      for (const [label, w] of sizes) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        const near = Math.abs((w ?? full) - current) < 12;
+        if (near) b.className = "on";
+        b.addEventListener("mousedown", (ev) => {
+          ev.preventDefault();
+          closeMenu();
+          setWidth(w);
+        });
+        menu.append(b);
+      }
+      const open = document.createElement("button");
+      open.type = "button";
+      open.textContent = "開く";
+      open.title = "画像ビューワーで開く";
+      open.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        closeMenu();
+        this.opts.openImage(this.name);
+      });
+      menu.append(open);
+      frame.append(menu);
+      document.addEventListener("mousedown", onOutside, true);
+    });
     return wrap;
+  }
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -246,7 +361,7 @@ export function buildDecorations(state: EditorState, focused: boolean, opts: Liv
         return;
       }
       const width = p.alias && /^\d+$/.test(p.alias) ? p.alias : null;
-      const widget = new ImageWidget(p.target, opts.imageSrc(p.target), width);
+      const widget = new ImageWidget(p.target, opts.imageSrc(p.target), width, opts, true);
       if (isActive) {
         out.push(Decoration.mark({ class: "cm-embed" }).range(s, e));
         out.push(Decoration.widget({ widget, block: true, side: 1 }).range(line.to));
@@ -256,7 +371,7 @@ export function buildDecorations(state: EditorState, focused: boolean, opts: Liv
       taken.push({ from: s, to: e });
       const url = m[2];
       const src = /^https?:\/\//i.test(url) ? url : opts.imageSrc(decodeURIComponent(url));
-      const widget = new ImageWidget(m[1] || url, src, null);
+      const widget = new ImageWidget(/^https?:/i.test(url) ? url : decodeURIComponent(url), src, null, opts, false);
       if (isActive) out.push(Decoration.widget({ widget, block: true, side: 1 }).range(line.to));
       else out.push(Decoration.replace({ widget }).range(s, e));
     });
