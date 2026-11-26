@@ -8,7 +8,7 @@ import { fuzzyScore } from "./lib/text";
 import { applyTheme, PROVIDERS, saveSettings, settings, type ProviderId } from "./settings";
 import { vault } from "./vault";
 
-function modal(title: string, content: HTMLElement, cls = ""): { close: () => void; root: HTMLElement } {
+export function modal(title: string, content: HTMLElement, cls = ""): { close: () => void; root: HTMLElement } {
   const prevFocus = document.activeElement as HTMLElement | null;
   const box = h("div", { class: `modal ${cls}`, role: "dialog", "aria-modal": "true", "aria-label": title });
   const overlay = h("div", { class: "overlay" }, box);

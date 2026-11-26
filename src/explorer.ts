@@ -8,7 +8,10 @@ import { searchLines } from "./lib/text";
 import { saveWorkspace, workspace } from "./settings";
 import { vault } from "./vault";
 
+import { activeConflicts } from "./conflictui";
+
 export interface ExplorerHost {
+  openConflicts(): void;
   openPath(path: string, other: boolean, line?: number): void;
   activePaths(): string[];
   renamed(map: Map<string, string>): void;
@@ -62,6 +65,7 @@ export class Explorer {
   private searching = false;
   private menu: HTMLElement | null = null;
   private dragPath: string | null = null;
+  private conflictBar: HTMLElement;
 
   constructor(private host: ExplorerHost) {
     this.filterInput = h("input", { type: "search", class: "input", placeholder: "絞り込み…", "aria-label": "ノートを絞り込み" });
@@ -92,7 +96,8 @@ export class Explorer {
       }),
       iconButton("search", "全文検索（Ctrl+Shift+F）", () => this.toggleSearch()),
     );
-    const treeView = h("div", { class: "tree-view" }, h("div", { class: "pad" }, this.filterInput), this.treeEl, this.quickEl);
+    this.conflictBar = h("button", { class: "conflict-bar", type: "button", onclick: () => this.host.openConflicts() });
+    const treeView = h("div", { class: "tree-view" }, this.conflictBar, h("div", { class: "pad" }, this.filterInput), this.treeEl, this.quickEl);
     const searchView = h("div", { class: "search-view" }, h("div", { class: "pad" }, this.searchInput), this.searchResults);
     this.el = h("nav", { class: "explorer", "aria-label": "エクスプローラー" }, head, treeView, searchView);
 
@@ -163,6 +168,10 @@ export class Explorer {
   }
 
   render(): void {
+    const conflicts = activeConflicts();
+    const conflictSet = new Set(conflicts.map((c) => c.path));
+    this.conflictBar.hidden = conflicts.length === 0;
+    this.conflictBar.replaceChildren(h("span", { class: "warn-icon" }, "⚠"), `競合コピーが ${conflicts.length}件 あります`, h("span", { class: "cf-go" }, "確認 ›"));
     const active = new Set(this.host.activePaths());
     const q = this.filterInput.value.trim().toLowerCase();
     const rows: HTMLElement[] = [];
@@ -185,6 +194,10 @@ export class Explorer {
       } else {
         r.append(h("span", { class: "chev-space" }), icon(isNote(n.path) ? "file" : "image", 14), h("span", { class: "label" }, isNote(n.path) ? noteName(n.path) : n.name));
         if (!isNote(n.path)) r.classList.add("asset");
+        if (conflictSet.has(n.path)) {
+          r.classList.add("conflict");
+          r.append(h("span", { class: "conflict-tag", title: "同期アプリが作った競合コピー" }, "競合"));
+        }
       }
       rows.push(r);
     };

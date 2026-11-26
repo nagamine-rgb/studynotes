@@ -1,6 +1,7 @@
 // ノートフォルダの中身（一覧・本文・リンク索引）をメモリに持つ
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { api, type Entry } from "./api";
+import { type Conflict, findConflicts } from "./lib/conflicts";
 import { dirName, extractLinks, fileName, joinPath, noteName, renameLinks, resolveLink } from "./lib/links";
 
 type Listener = () => void;
@@ -99,6 +100,11 @@ class Vault {
     const hit = { path };
     const sep = this.root.includes("\\") ? "\\" : "/";
     return convertFileSrc(`${this.root}${sep}${hit.path.split("/").join(sep)}`);
+  }
+
+  /** 同期アプリが作った競合コピー */
+  conflicts(): Conflict[] {
+    return findConflicts(this.entries.filter((e) => !e.is_dir).map((e) => e.path));
   }
 
   backlinks(path: string): string[] {

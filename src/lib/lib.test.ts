@@ -110,3 +110,44 @@ describe("render", () => {
     expect(html).toContain('<input type="checkbox" disabled checked> 済み');
   });
 });
+
+import { findConflicts } from "./conflicts";
+import { diffLines } from "./diff";
+
+describe("conflicts", () => {
+  it("detects copies from each sync app", () => {
+    const paths = [
+      "英語/単語.md",
+      "英語/単語 (Taro's conflicted copy 2026-11-26).md",
+      "英語/単語 (Taro の競合コピー 2026-11-26).md",
+      "英語/単語.sync-conflict-20261126-123456-ABCDEF1.md",
+      "英語/単語-DESKTOP-AB12CD.md",
+      "英語/単語 (conflict).md",
+      "attachments/図.png",
+      "attachments/図-LAPTOP-XY99.png",
+      "歴史/元寇.md",
+      "歴史/元寇-TOEIC.md", // 普通のノート名（PC名らしくない）なので競合ではない
+      "歴史/NOTE-ABCD.md", // 元の NOTE.md がないので競合ではない
+      "歴史/鎌倉時代.md",
+    ];
+    const c = findConflicts(paths);
+    const byPath = Object.fromEntries(c.map((x) => [x.path, x]));
+    expect(byPath["英語/単語 (Taro's conflicted copy 2026-11-26).md"]).toMatchObject({ original: "英語/単語.md", source: "Dropbox" });
+    expect(byPath["英語/単語 (Taro の競合コピー 2026-11-26).md"]).toMatchObject({ original: "英語/単語.md", source: "Dropbox" });
+    expect(byPath["英語/単語.sync-conflict-20261126-123456-ABCDEF1.md"]).toMatchObject({ original: "英語/単語.md", source: "Syncthing" });
+    expect(byPath["英語/単語-DESKTOP-AB12CD.md"]).toMatchObject({ original: "英語/単語.md", source: "OneDrive" });
+    expect(byPath["英語/単語 (conflict).md"]).toMatchObject({ original: "英語/単語.md" });
+    expect(byPath["attachments/図-LAPTOP-XY99.png"]).toMatchObject({ original: "attachments/図.png" });
+    expect(byPath["歴史/NOTE-ABCD.md"]).toBeUndefined();
+    expect(byPath["歴史/元寇-TOEIC.md"]).toBeUndefined();
+    expect(byPath["歴史/鎌倉時代.md"]).toBeUndefined();
+    expect(byPath["英語/単語.md"]).toBeUndefined();
+  });
+});
+
+describe("diff", () => {
+  it("finds added and removed lines", () => {
+    const d = diffLines("a\nb\nc\nd", "a\nB\nc\nd\ne");
+    expect(d.map((l) => `${l.kind}:${l.text}`)).toEqual(["same:a", "del:b", "add:B", "same:c", "same:d", "add:e"]);
+  });
+});

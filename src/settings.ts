@@ -53,6 +53,8 @@ export interface Workspace {
   openFolders: string[];
   pins: string[];
   recent: string[];
+  /** 「競合ではない」とした競合コピー候補 */
+  ignoredConflicts: string[];
 }
 
 export const defaultWorkspace = (): Workspace => ({
@@ -66,6 +68,7 @@ export const defaultWorkspace = (): Workspace => ({
   openFolders: [],
   pins: [],
   recent: [],
+  ignoredConflicts: [],
 });
 
 function merge<T>(base: T, loaded: unknown): T {

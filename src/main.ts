@@ -7,6 +7,7 @@ import { AiPanel } from "./aipanel";
 import { api } from "./api";
 import { openFolderBrowser, openQuickSwitcher, openSettings, pickVaultFolder } from "./dialogs";
 import { h, icon, iconButton, toast } from "./dom";
+import { activeConflicts, openConflictDialog } from "./conflictui";
 import { Explorer } from "./explorer";
 import { FormatBar } from "./formatbar";
 import { dirName, noteName } from "./lib/links";
@@ -85,6 +86,7 @@ class App {
     };
     this.panes = { L: new Pane("L", host), R: new Pane("R", host) };
     this.explorer = new Explorer({
+      openConflicts: () => this.openConflicts(),
       openPath: (p, other, line) => void this.openPath(p, other, line),
       activePaths: () => (Object.values(this.panes) as Pane[]).filter((p) => this.visible(p.id)).map((p) => p.path).filter((p): p is string => !!p),
       renamed: (map) => {
@@ -247,6 +249,32 @@ class App {
   /** スマホ版：Android の戻るボタンで前のノートに戻れるよう、履歴に積む */
   private pushHistory(): void {
     if (this.mobile) history.pushState({ studynotes: true }, "");
+  }
+
+  openConflicts(): void {
+    this.closeDrawer();
+    openConflictDialog({
+      openPath: (p) => void this.openPath(p, false),
+      afterChange: (changed, removed, renamed) => {
+        if (renamed) for (const p of Object.values(this.panes)) p.renamed(renamed);
+        for (const p of Object.values(this.panes)) {
+          for (const r of removed) p.removed(r);
+          if (p.path && changed.includes(p.path)) void p.externalChange();
+        }
+        this.refreshPreviews();
+        this.paneChanged();
+        this.knownConflicts = new Set(activeConflicts().map((c) => c.path));
+      },
+    });
+  }
+
+  /** 新しい競合コピーが現れたら知らせる */
+  private knownConflicts = new Set<string>();
+  private checkConflicts(): void {
+    const now = activeConflicts().map((c) => c.path);
+    const fresh = now.filter((p) => !this.knownConflicts.has(p));
+    this.knownConflicts = new Set(now);
+    if (fresh.length) toast(`同期アプリの競合コピーが ${fresh.length}件 見つかりました。エクスプローラー上部の「⚠ 競合コピー」から確認できます`, "error");
   }
 
   closeDrawer(): void {
@@ -423,6 +451,8 @@ class App {
     this.paneChanged();
     this.unlisten?.();
     this.unlisten = await listen<string[]>("vault-changed", (e) => void this.onExternalChange(e.payload));
+    this.knownConflicts = new Set();
+    this.checkConflicts();
   }
 
   private async onExternalChange(paths: string[]): Promise<void> {
@@ -431,6 +461,7 @@ class App {
       if (p.path && (updated.has(p.path) || !vault.notes.has(p.path))) await p.externalChange();
     }
     this.refreshPreviews();
+    this.checkConflicts();
   }
 
   async flushAll(): Promise<void> {
