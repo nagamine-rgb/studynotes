@@ -151,3 +151,59 @@ describe("diff", () => {
     expect(d.map((l) => `${l.kind}:${l.text}`)).toEqual(["same:a", "del:b", "add:B", "same:c", "same:d", "add:e"]);
   });
 });
+
+import * as T from "./table";
+import { renameEmbeds } from "./links";
+
+describe("table", () => {
+  const md = "| 科目 | 評価 |\n| --- | :---: |\n| 物理 | A |\n| ![[図.png\\|200]] | x\\|y<br>z |";
+  it("parses and writes markdown tables", () => {
+    const t = T.parseMarkdownTable(md.split("\n"))!;
+    expect(t.cells).toEqual([["科目", "評価"], ["物理", "A"], ["![[図.png|200]]", "x|y\nz"]]);
+    expect(t.aligns).toEqual(["", "center"]);
+    expect(T.toMarkdown(t)).toBe(md);
+    expect(parseLink("図.png\\|200")).toMatchObject({ target: "図.png", alias: "200" });
+    expect(renameEmbeds(md, "図.png", "図2.png")).toContain("![[図2.png\\|200]]");
+    expect(renameLinks("| [[a\\|A]] |", "a", "b")).toBe("| [[b\\|A]] |");
+  });
+  it("finds tables outside code blocks", () => {
+    const lines = ["# x", "", ...md.split("\n"), "", "```", "| a |", "| - |", "```", "<table>", "<tr><th>a</th></tr>", "</table>"];
+    const found = T.findTables(lines);
+    expect(found.map((b) => [b.startLine, b.endLine, b.kind])).toEqual([[3, 6, "md"], [12, 14, "html"]]);
+  });
+  it("merges cells and writes html, unmerge returns to markdown", () => {
+    let t = T.emptyTable(3, 3);
+    t = T.setCell(t, 0, 0, "科目");
+    t = T.setCell(t, 0, 2, "評価");
+    t = T.setCell(t, 1, 0, "物理");
+    t = T.setCell(t, 1, 1, "実技");
+    t = T.setCell(t, 2, 1, "理論");
+    t = T.setCell(t, 1, 2, "A");
+    t = T.setCell(t, 2, 2, "B+");
+    t = T.mergeCells(t, 0, 0, 0, 1);
+    t = T.mergeCells(t, 1, 0, 2, 0);
+    const html = T.serialize(t);
+    expect(html).toBe(
+      '<table>\n<tr><th colspan="2">科目</th><th>評価</th></tr>\n<tr><td rowspan="2">物理</td><td>実技</td><td>A</td></tr>\n<tr><td>理論</td><td>B+</td></tr>\n</table>',
+    );
+    const back = T.parseHtmlTable(html)!;
+    expect(back.cells).toEqual(t.cells);
+    expect(back.merges).toEqual(t.merges);
+    let u = T.unmergeCell(back, 2, 0);
+    u = T.unmergeCell(u, 0, 1);
+    expect(T.serialize(u).startsWith("| 科目 |")).toBe(true);
+  });
+  it("keeps merges consistent when rows/cols change", () => {
+    let t = T.mergeCells(T.emptyTable(4, 3), 1, 0, 2, 0);
+    t = T.setCell(t, 1, 0, "物理");
+    expect(T.insertRow(t, 2).merges).toEqual([{ r: 1, c: 0, rs: 3, cs: 1 }]);
+    expect(T.insertRow(t, 0).merges).toEqual([{ r: 2, c: 0, rs: 2, cs: 1 }]);
+    const d = T.deleteRow(t, 1);
+    expect(d.merges).toEqual([]);
+    expect(d.cells[1][0]).toBe("物理");
+    expect(T.insertCol(T.mergeCells(T.emptyTable(2, 3), 0, 0, 0, 1), 1).merges).toEqual([{ r: 0, c: 0, rs: 1, cs: 3 }]);
+    expect(T.deleteCol(T.mergeCells(T.emptyTable(2, 3), 0, 0, 0, 1), 0).merges).toEqual([]);
+    // 結合の一部だけ選んでも結合全体が含まれるよう広がる
+    expect(T.expandRect(T.mergeCells(T.emptyTable(3, 3), 0, 0, 1, 1), 1, 1, 2, 2)).toEqual({ r1: 0, c1: 0, r2: 2, c2: 2 });
+  });
+});

@@ -9,6 +9,8 @@ export interface ParsedLink {
 export const WIKILINK_RE = /(!?)\[\[([^\[\]\n]+?)\]\]/g;
 
 export function parseLink(inner: string): ParsedLink {
+  // 表の中では区切りの | を \| と書く
+  inner = inner.replace(/\\\|/g, "|");
   const bar = inner.indexOf("|");
   const main = bar >= 0 ? inner.slice(0, bar) : inner;
   const alias = bar >= 0 ? inner.slice(bar + 1).trim() : null;
@@ -86,12 +88,12 @@ function escapeRe(s: string): string {
  * [[旧名]] [[旧名|表示]] [[旧名#見出し]] [[フォルダ/旧名]] に対応。埋め込み ![[...]] は対象外。
  */
 export function renameLinks(content: string, oldName: string, newName: string): string {
-  const re = new RegExp(`(?<!!)\\[\\[((?:[^\\[\\]\\n|#]*/)?)(${escapeRe(oldName)})(\\.md)?(?=[\\]|#])`, "gi");
+  const re = new RegExp(`(?<!!)\\[\\[((?:[^\\[\\]\\n|#]*/)?)(${escapeRe(oldName)})(\\.md)?(?=\\\\?[\\]|#])`, "gi");
   return content.replace(re, (_m, dir: string, _name: string, ext: string | undefined) => `[[${dir}${newName}${ext ?? ""}`);
 }
 
 /** 画像の埋め込みファイル名を書き換える（attachments の名前変更用） */
 export function renameEmbeds(content: string, oldFile: string, newFile: string): string {
-  const re = new RegExp(`!\\[\\[(${escapeRe(oldFile)})(?=[\\]|])`, "gi");
+  const re = new RegExp(`!\\[\\[(${escapeRe(oldFile)})(?=\\\\?[\\]|])`, "gi");
   return content.replace(re, `![[${newFile}`);
 }

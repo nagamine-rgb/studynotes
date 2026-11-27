@@ -99,6 +99,7 @@ export class Pane {
       openImage: (name) => this.openImage(name),
       noteNames: () => vault.notePaths().map(noteName),
       onImages: (files, pos) => void this.pasteImages(files, pos),
+      saveImages: (files) => this.saveImages(files),
       onIssueAction: (id, action) => this.host.issueAction(this, id, action),
       onFocus: () => this.host.activate(this.id),
     });
@@ -261,6 +262,21 @@ export class Pane {
 
   /** 画像ファイル（貼り付け・ドロップ）を attachments に保存して埋め込む */
   async pasteImages(files: File[], pos: number): Promise<void> {
+    const names = await this.saveFiles(files);
+    await this.insertImages(names, pos);
+  }
+
+  /** 画像を保存して名前を返す（表のセルに貼るとき） */
+  async saveImages(files: File[]): Promise<string[]> {
+    const names = await this.saveFiles(files);
+    if (names.length) {
+      await vault.refresh([]);
+      toast("画像を attachments に保存しました");
+    }
+    return names;
+  }
+
+  private async saveFiles(files: File[]): Promise<string[]> {
     const names: string[] = [];
     for (const f of files) {
       const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg").replace("svg+xml", "svg");
@@ -271,7 +287,7 @@ export class Pane {
         toast(errorText(e), "error");
       }
     }
-    await this.insertImages(names, pos);
+    return names;
   }
 
   /** 保存済みの画像名を本文に埋め込む */

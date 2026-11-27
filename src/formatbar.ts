@@ -8,7 +8,6 @@ export interface FormatHost {
   activePane(): Pane;
 }
 
-const TABLE = "| 項目 | 内容 |\n| --- | --- |\n|  |  |";
 
 export class FormatBar {
   el: HTMLElement;
@@ -51,7 +50,7 @@ export class FormatBar {
       sep(),
       btn("", "ノートへのリンク [[…]]（Ctrl+K）", () => ed().insertLink(), "link"),
       btn("", "画像を挿入", () => void this.pickImages(), "image"),
-      btn("", "表", () => ed().insertBlock(TABLE, TABLE.indexOf("項目")), "table"),
+      btn("", "表（本文で / を打つと大きさを選べます）", () => ed().insertTable(3, 3), "table"),
       btn("", "コード（文中）", () => ed().wrap("`", "`"), "code"),
       btn("", "コードブロック", () => ed().insertBlock("```\n\n```", 4), "codeblock"),
       btn("", "区切り線", () => ed().insertBlock("---"), "hr"),

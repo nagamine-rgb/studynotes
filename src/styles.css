@@ -544,3 +544,33 @@ code.path { font-family: var(--mono); font-size: 12px; background: var(--code-bg
 .cf-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px 16px; border-top: 1px solid var(--border); }
 .btn.danger { color: var(--typo); border-color: color-mix(in srgb, var(--typo) 50%, transparent); }
 .mobile .cf-actions .btn { height: 40px; }
+
+/* ---- 表（編集画面） ---- */
+.cm-table-wrap { overflow-x: auto; padding: 6px 0 12px; line-height: 1.6; }
+.cm-table { border-collapse: collapse; min-width: 50%; max-width: none; }
+.cm-table th, .cm-table td {
+  border: 1px solid var(--border-strong); padding: 6px 10px; min-width: 64px; vertical-align: top;
+  text-align: left; cursor: text; position: relative;
+}
+.cm-table th { background: var(--panel); font-weight: 700; }
+.cm-table td.sel, .cm-table th.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.cm-table .editing { box-shadow: inset 0 0 0 2px var(--accent); }
+.cm-cell { min-height: 1.6em; white-space: normal; overflow-wrap: anywhere; }
+.cm-cell .cm-image { display: inline-block; padding: 2px 0; vertical-align: top; }
+.cm-cell .cm-image img { border-radius: 6px; }
+.cm-cell .cm-image.missing { line-height: 1.6; }
+.cm-cell a.wl { color: var(--accent); text-decoration: none; cursor: pointer; }
+.cm-cell a.wl.missing { color: var(--muted); text-decoration: underline dashed; }
+.cm-cell a.ext { color: var(--accent); }
+.cm-cell mark.hl { background: var(--hl, #fde68a); color: inherit; padding: 0 2px; border-radius: 3px; }
+.cm-cell .cloze { border-bottom: 2px dotted var(--accent); }
+.cm-cell-input {
+  display: block; width: 100%; min-width: 80px; box-sizing: border-box; resize: none; overflow: hidden;
+  border: 0; outline: none; padding: 0; margin: 0; background: transparent; color: var(--text);
+  font: inherit; line-height: 1.6;
+}
+.context-menu .menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.context-menu button:disabled { color: var(--muted); cursor: default; background: none; }
+.note td img.embed, .note th img.embed { border-radius: 6px; margin: 2px 0; display: inline-block; }
+.note td img.embed:not([width]), .note th img.embed:not([width]) { width: 200px; }
+.note th, .note td { vertical-align: top; }

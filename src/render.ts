@@ -1,5 +1,6 @@
 // Markdown → HTML（閲覧・暗記モード用）
-import MarkdownIt, { type StateCore, type StateInline } from "markdown-it";
+import MarkdownIt, { type StateBlock, type StateCore, type StateInline } from "markdown-it";
+import { coveredSet, mergeAt, parseHtmlTable } from "./lib/table";
 import { parseLink } from "./lib/links";
 import { parseFrontmatter } from "./lib/text";
 
@@ -52,6 +53,55 @@ function wikilink(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+/** 表のセルの中の <br>（改行）だけは HTML として扱う */
+function brTag(state: StateInline, silent: boolean): boolean {
+  const m = /^<br\s*\/?>/i.exec(state.src.slice(state.pos, state.pos + 6));
+  if (!m) return false;
+  if (!silent) state.push("hardbreak", "br", 0);
+  state.pos += m[0].length;
+  return true;
+}
+
+/** セルを結合した表（StudyNotes が書く <table>…</table>）を表として描く */
+function htmlTable(state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean {
+  const lineText = (n: number) => state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n]);
+  if (!/^<table[\s>]/i.test(lineText(startLine))) return false;
+  let end = startLine;
+  while (end < endLine && !/<\/table>\s*$/i.test(lineText(end))) end++;
+  if (end >= endLine) return false;
+  const lines: string[] = [];
+  for (let n = startLine; n <= end; n++) lines.push(lineText(n));
+  const model = parseHtmlTable(lines.join("\n"));
+  if (!model) return false;
+  if (silent) return true;
+  const covered = coveredSet(model);
+  const open = state.push("table_open", "table", 1);
+  open.map = [startLine, end + 1];
+  state.push("tbody_open", "tbody", 1);
+  model.cells.forEach((row, r) => {
+    state.push("tr_open", "tr", 1);
+    const tag = r === 0 ? "th" : "td";
+    row.forEach((text, c) => {
+      if (covered.has(`${r},${c}`)) return;
+      const cell = state.push(`${tag}_open`, tag, 1);
+      const m = mergeAt(model, r, c);
+      if (m && m.rs > 1) cell.attrSet("rowspan", String(m.rs));
+      if (m && m.cs > 1) cell.attrSet("colspan", String(m.cs));
+      if (model.aligns[c]) cell.attrSet("style", `text-align:${model.aligns[c]}`);
+      const inline = state.push("inline", "", 0);
+      inline.content = text;
+      inline.map = [startLine, end + 1];
+      inline.children = [];
+      state.push(`${tag}_close`, tag, -1);
+    });
+    state.push("tr_close", "tr", -1);
+  });
+  state.push("tbody_close", "tbody", -1);
+  state.push("table_close", "table", -1);
+  state.line = end + 1;
+  return true;
+}
+
 function sourceLines(state: StateCore) {
   for (const t of state.tokens) {
     if (t.map && t.nesting === 1) t.attrSet("data-line", String(t.map[0]));
@@ -76,6 +126,8 @@ function taskLists(state: StateCore) {
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 md.inline.ruler.before("link", "wikilink", wikilink);
+md.inline.ruler.before("html_inline", "br_tag", brTag);
+md.block.ruler.before("table", "html_table", htmlTable, { alt: ["paragraph", "reference"] });
 md.inline.ruler.before("emphasis", "mark", delimited("==", "==", "mark"));
 md.inline.ruler.before("emphasis", "cloze", delimited("{{", "}}", "cloze"));
 md.core.ruler.push("source_lines", sourceLines);
@@ -119,4 +171,10 @@ export function renderNote(content: string, context: RenderContext): string {
     html = html.replace(/data-line="(\d+)"/g, (_m, n: string) => `data-line="${Number(n) + skippedLines}"`);
   }
   return html;
+}
+
+/** 表のセルの中身（行内の書式だけ）をHTMLにする */
+export function renderInline(text: string, context: RenderContext): string {
+  ctx = context;
+  return md.renderInline(text.replace(/\n/g, "<br>"));
 }

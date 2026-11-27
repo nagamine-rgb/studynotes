@@ -2,6 +2,9 @@
 import { type EditorState, type Range, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { parseLink } from "./lib/links";
+import { createImageView } from "./imageview";
+import { findTables } from "./lib/table";
+import { TableWidget } from "./tablewidget";
 
 export interface LivePreviewOptions {
   linkExists(target: string): boolean;
@@ -12,6 +15,8 @@ export interface LivePreviewOptions {
   openUrl(url: string): void;
   /** 画像を Windows に関連付けられたアプリで開く */
   openImage(nameOrPath: string): void;
+  /** 画像ファイルを attachments に保存して名前を返す（表のセルへの貼り付け用） */
+  saveImages(files: File[]): Promise<string[]>;
 }
 
 /** フォーカスの有無（フォーカスがないときはどの行も整形表示） */
@@ -52,33 +57,6 @@ class ImageWidget extends WidgetType {
       wrap.textContent = `画像が見つかりません: ${this.name}`;
       return wrap;
     }
-    const frame = document.createElement("span");
-    frame.className = "cm-image-frame";
-    let menu: HTMLElement | null = null;
-    const onOutside = (e: MouseEvent) => {
-      if (menu && !menu.contains(e.target as Node) && e.target !== img) closeMenu();
-    };
-    const closeMenu = () => {
-      menu?.remove();
-      menu = null;
-      document.removeEventListener("mousedown", onOutside, true);
-    };
-    const img = document.createElement("img");
-    img.src = this.src;
-    img.alt = this.name;
-    img.draggable = false;
-    img.title = "クリックで大きさを選ぶ／ダブルクリックで画像ビューワーで開く";
-    // 大きさは枠の幅で決める（指定がなければ本文の幅いっぱい）
-    frame.style.width = this.width ? `${this.width}px` : "100%";
-    frame.append(img);
-    wrap.append(frame);
-    img.addEventListener("dblclick", (e) => {
-      e.preventDefault();
-      closeMenu();
-      this.opts.openImage(this.name);
-    });
-    if (!this.editable) return wrap;
-
     // 本文の幅（左右の余白を除く）
     const fullWidth = () => Math.max(120, Math.floor(view.contentDOM.getBoundingClientRect().width - 56));
     const setWidth = (w: number | null) => {
@@ -87,73 +65,25 @@ class ImageWidget extends WidgetType {
       const insert = `![[${this.name}${w ? `|${w}` : ""}]]`;
       view.dispatch({ changes: { from: r.from, to: r.to, insert } });
     };
-
-    // 右下のつまみでドラッグして大きさを変える
-    const handle = document.createElement("span");
-    handle.className = "cm-image-resize";
-    handle.title = "ドラッグで大きさを変える";
-    handle.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      closeMenu();
-      handle.setPointerCapture(e.pointerId);
-      const startX = e.clientX;
-      const startW = frame.getBoundingClientRect().width;
-      const max = fullWidth();
-      let w = startW;
-      const move = (ev: PointerEvent) => {
-        w = Math.min(max, Math.max(80, startW + ev.clientX - startX));
-        frame.style.width = `${w}px`;
-      };
-      const up = () => {
-        handle.removeEventListener("pointermove", move);
-        handle.removeEventListener("pointerup", up);
-        setWidth(w >= max - 4 ? null : Math.round(w / 10) * 10);
-      };
-      handle.addEventListener("pointermove", move);
-      handle.addEventListener("pointerup", up);
-    });
-    frame.append(handle);
-
-    // クリックで 小・中・大
-    img.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (menu) return closeMenu();
-      const full = fullWidth();
-      const current = this.width ? Number(this.width) : full;
-      const sizes: [string, number | null][] = [
-        ["小", Math.round(full / 3 / 10) * 10],
-        ["中", Math.round((full * 2) / 3 / 10) * 10],
-        ["大", null],
-      ];
-      menu = document.createElement("span");
-      menu.className = "cm-image-menu";
-      for (const [label, w] of sizes) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = label;
-        const near = Math.abs((w ?? full) - current) < 12;
-        if (near) b.className = "on";
-        b.addEventListener("mousedown", (ev) => {
-          ev.preventDefault();
-          closeMenu();
-          setWidth(w);
-        });
-        menu.append(b);
-      }
-      const open = document.createElement("button");
-      open.type = "button";
-      open.textContent = "開く";
-      open.title = "画像ビューワーで開く";
-      open.addEventListener("mousedown", (ev) => {
-        ev.preventDefault();
-        closeMenu();
-        this.opts.openImage(this.name);
-      });
-      menu.append(open);
-      frame.append(menu);
-      document.addEventListener("mousedown", onOutside, true);
-    });
+    wrap.append(
+      createImageView({
+        name: this.name,
+        src: this.src,
+        width: this.width,
+        onWidth: this.editable ? setWidth : undefined,
+        maxWidth: fullWidth,
+        sizes: () => {
+          const full = fullWidth();
+          return [
+            ["小", Math.round(full / 3 / 10) * 10],
+            ["中", Math.round((full * 2) / 3 / 10) * 10],
+            ["大", null],
+          ];
+        },
+        defaultCss: "100%",
+        openImage: (n) => this.opts.openImage(n),
+      }),
+    );
     return wrap;
   }
   ignoreEvent() {
@@ -278,6 +208,10 @@ export function buildDecorations(state: EditorState, focused: boolean, opts: Liv
   }
   let inFence = false;
   let inFront = doc.lines > 1 && doc.line(1).text.trim() === "---";
+  // 表はいつもマス目で表示する（中身はセルを直接クリックして編集）
+  const lines: string[] = [];
+  for (let n = 1; n <= doc.lines; n++) lines.push(doc.line(n).text);
+  const tables = new Map(findTables(lines).map((t) => [t.startLine, t]));
   for (let n = 1; n <= doc.lines; n++) {
     const line = doc.line(n);
     const text = line.text;
@@ -287,6 +221,14 @@ export function buildDecorations(state: EditorState, focused: boolean, opts: Liv
     if (inFront) {
       lineDeco("cm-frontmatter");
       if (n > 1 && text.trim() === "---") inFront = false;
+      continue;
+    }
+    const table = !inFence ? tables.get(n) : undefined;
+    if (table) {
+      const last = doc.line(table.endLine);
+      const source = doc.sliceString(line.from, last.to);
+      out.push(Decoration.replace({ widget: new TableWidget(source, table.model, opts), block: true }).range(line.from, last.to));
+      n = table.endLine;
       continue;
     }
     if (/^\s*(```|~~~)/.test(text)) {

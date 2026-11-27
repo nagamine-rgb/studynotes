@@ -11,6 +11,7 @@ import { parseLink, WIKILINK_RE } from "./lib/links";
 import { livePreview, refreshPreview, type LivePreviewOptions } from "./livepreview";
 import type { LocatedIssue } from "./lib/issues";
 import { toggleHighlight } from "./lib/text";
+import { insertTable } from "./tablewidget";
 
 export interface EditorOptions extends Omit<LivePreviewOptions, "openLink"> {
   onChange(text: string, changes: { from: number; to: number; insertedLength: number }[]): void;
@@ -141,6 +142,30 @@ function linkCompletion(names: () => string[]) {
   };
 }
 
+/** 行の頭で / を打つと表の大きさを選べる（/table、/表、/3x4 など） */
+function slashCompletion(ctx: CompletionContext): CompletionResult | null {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const before = line.text.slice(0, ctx.pos - line.from);
+  const m = /^\s*\/([^\s/]*)$/.exec(before);
+  if (!m) return null;
+  const q = m[1].toLowerCase();
+  const from = line.from + before.lastIndexOf("/");
+  const option = (rows: number, cols: number) => ({
+    label: `表 / ${rows}x${cols}`,
+    type: "table",
+    apply: (view: EditorView, _c: unknown, _f: number, to: number) => insertTable(view, from, to, rows, cols),
+  });
+  const size = /^(\d{1,2})[x×*](\d{1,2})$/.exec(q);
+  if (size) {
+    const rows = Math.min(30, Number(size[1]));
+    const cols = Math.min(12, Number(size[2]));
+    return rows && cols ? { from, options: [option(rows, cols)], filter: false } : null;
+  }
+  const words = ["table", "表", "ひょう", "hyou"];
+  if (q && !words.some((w) => w.startsWith(q))) return null;
+  return { from, options: [2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => option(n, n)), filter: false };
+}
+
 export class NoteEditor {
   view: EditorView;
   private applyingExternal = false;
@@ -180,7 +205,7 @@ export class NoteEditor {
       ),
       issueField,
       issueTooltip(opts.onIssueAction),
-      autocompletion({ override: [linkCompletion(opts.noteNames)], icons: false }),
+      autocompletion({ override: [linkCompletion(opts.noteNames), slashCompletion], icons: false }),
       keymap.of([
         {
           key: "Mod-h",
@@ -370,6 +395,12 @@ export class NoteEditor {
     const caret = pos + before.length + (cursorOffset ?? text.length);
     v.dispatch({ changes: { from: pos, insert }, selection: EditorSelection.cursor(caret) });
     v.focus();
+  }
+
+  /** カーソル位置に空の表を入れて、左上のセルから書けるようにする */
+  insertTable(rows: number, cols: number): void {
+    const { from, to } = this.view.state.selection.main;
+    insertTable(this.view, from, to, rows, cols);
   }
 
   /** [[ を入れてノート名の候補を出す（選択中の文字があればそれをリンクにする） */
